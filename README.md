@@ -2,7 +2,18 @@
 
 Working repo for the new Alta Home quote automation workflow.
 
-The intended workflow starts in AgencyZoom, passes through Apex/LEX, opens Alta/GWPC, completes a Home quote while collecting quote information, then returns to AgencyZoom to finish the ticket with the quote results.
+The intended workflow starts in AgencyZoom, passes through Apex, opens Alta, completes a Home quote while collecting quote information, then returns to AgencyZoom to finish the ticket with the quote results.
+
+## Alta Home Quote Pages
+
+The Alta-side scripts for this project should run only on these Home quote pages:
+
+| Page | URL |
+| --- | --- |
+| Personal Info | `https://alta.farmers.com/quote/auto/personal-info` |
+| Home Features | `https://alta.farmers.com/quote/home/home-features` |
+| Replacement Cost | `https://alta.farmers.com/quote/home/replacement-cost` |
+| Home Coverage | `https://alta.farmers.com/quote/home/home-coverage` |
 
 ## Layout
 

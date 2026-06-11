@@ -24,10 +24,6 @@ Active Home quote scripts live in `Alta/`.
 | `ui-dock-organizer/` | Organizes floating automation panels across AgencyZoom, Apex/LEX, and GWPC. |
 | `webhook-submission/` | Sends the final Home quote payload to the configured webhook. |
 
-### Not Needed
-
-`Alta/Not Needed/` contains disabled Personal Auto placeholders that are being kept for reference and Tampermonkey updater continuity.
-
 ## Update URLs
 
 The Tampermonkey `@updateURL` and `@downloadURL` values point at this repo under:

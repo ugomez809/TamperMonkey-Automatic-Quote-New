@@ -29,6 +29,10 @@ Each script folder now keeps a per-script updater beside the main script:
 Tampermonkey `@updateURL` and `@downloadURL` pointed at the matching raw GitHub
 path in this repo.
 
+`alta-updater-installer` is a helper installer only. It opens the updater-only
+install links so the workflow can be installed by installing updater scripts
+instead of installing both updater and main scripts manually.
+
 ## Selector Notes
 
 - Angular Material IDs such as `mat-select-342` are dynamic and should be used

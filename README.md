@@ -40,3 +40,9 @@ Active Home quote scripts live in `Alta/`.
 The Tampermonkey `@updateURL` and `@downloadURL` values point at this repo under:
 
 `https://raw.githubusercontent.com/ugomez809/TamperMonkey-Automatic-Quote-New/main/Alta/...`
+
+## Updater-Only Installer
+
+Use this single installer to open the updater script install tabs:
+
+`https://raw.githubusercontent.com/ugomez809/TamperMonkey-Automatic-Quote-New/main/Alta/alta-updater-installer/alta-updater-installer.user.js`

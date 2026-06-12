@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Alta Home Coverage
 // @namespace    homebot.alta-home-coverage
-// @version      0.1.4
+// @version      0.1.5
 // @description  Manual Alta home-coverage page runner. Sets All Perils to 5000, Split Water to 5 percent, captures pricing, and publishes the Alta home payload.
 // @author       OpenAI
 // @match        https://alta.farmers.com/quote/*
@@ -19,14 +19,14 @@
   try { window.__ALTA_HOME_COVERAGE_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'Alta Home Coverage';
-  const VERSION = '0.1.4';
+  const VERSION = '0.1.5';
   const KEYS = {
     currentJob: 'tm_alta_current_job_v1',
     payload: 'tm_alta_home_quote_grab_payload_v1',
     panelPos: 'tm_alta_home_coverage_panel_pos_v1',
     logs: 'tm_alta_home_coverage_logs_v1'
   };
-  const CFG = { maxLogLines: 30, waitMs: 12000, pollMs: 200, priceWaitMs: 20000 };
+  const CFG = { maxLogLines: 36, waitMs: 12000, pollMs: 200, priceWaitMs: 20000 };
   const state = { panel: null, ui: {}, logs: [] };
 
   init();
@@ -45,7 +45,7 @@
     try { delete window.__ALTA_HOME_COVERAGE_CLEANUP__; } catch {}
   }
 
-  async function runPage({ publish = true, clickQuote = true } = {}) {
+  async function runPage({ publish = true } = {}) {
     try {
       setStatus('Running home coverage');
       await waitFor(() => isHomeCoverageReady());
@@ -53,42 +53,28 @@
       await setMatSelectByAria('Policy deductibles-All perils-', '$5,000', false);
       await setMatSelectByAria('Policy deductibles-Split water-', '(5.0%)', false);
 
-      if (clickQuote) {
-        const cta = document.querySelector('button[data-test-id="TUI_REVIEW_COVERAGE_CARD_CTA"]');
-        if (cta && /recalculate|go/i.test(normalize(cta.textContent))) {
-          cta.click();
-          log(`Clicked quote CTA: ${normalize(cta.textContent) || 'button'}`);
-          await sleep(1500);
-          await waitFor(() => {
-            const price = capturePrice();
-            return price.valid ? price : null;
-          }, CFG.priceWaitMs).catch(() => null);
-        } else {
-          log('Quote CTA not available; extracting current page state');
-        }
-      }
-
-      const price = capturePrice();
+      const pricing = await captureAllPricing();
       const coverageData = captureCoverageData();
-      const result = price.valid ? 'Grabbed (Alta)' : `Alta pricing unavailable${price.reason ? `: ${price.reason}` : ''}`;
+      const capturedCount = Object.values(pricing.rowUpdates).filter(Boolean).length;
+      const result = capturedCount
+        ? `Grabbed ${capturedCount}/4 Alta price${capturedCount === 1 ? '' : 's'}`
+        : 'Alta pricing unavailable: no valid prices captured';
       const rowUpdates = {
-        'Standard Pricing No Auto Discount': price.valid ? price.termPremium : '',
-        'Enhance Pricing No Auto Discount': '',
-        'Standard Pricing Auto Discount': '',
-        'Enhance Pricing Auto Discount': '',
-        'Auto Discount': '',
+        ...pricing.rowUpdates,
+        'Auto Discount': pricing.autoDiscountSeen ? 'Yes' : 'No',
         'Date Processed?': formatDate(new Date()),
-        'Done?': price.valid ? 'Yes' : 'No',
+        'Done?': capturedCount ? 'Yes' : 'No',
         Result: result,
         'Water Device?': ''
       };
-      const payload = updatePayload(rowUpdates, { homeCoverageComplete: true, finalRefreshComplete: true }, publish, {
+      const payload = updatePayload(rowUpdates, { homeCoverageComplete: !!capturedCount, finalRefreshComplete: !!capturedCount }, publish && !!capturedCount, {
         altaCoverage: {
-          price,
-          coverageData
+          price: pricing.lastPrice || {},
+          coverageData,
+          pricingRuns: pricing.runs
         }
       });
-      log(price.valid ? `Captured price ${price.termPremium}` : result);
+      log(result);
       log(publish ? `Published payload for AZ ${payload['AZ ID'] || '(unknown)'}` : 'Capture only complete');
       setStatus(publish ? 'Published' : 'Captured');
     } catch (err) {
@@ -104,26 +90,35 @@
 
   async function setMatSelectByAria(ariaLabel, wantedText, required = true) {
     const select = await waitFor(() => findMatSelectByAria(ariaLabel), required ? CFG.waitMs : 1500).catch(() => null);
+    return setMatSelectValue(select, wantedText, ariaLabel, required);
+  }
+
+  async function setCoverageTemplate(wantedText, required = true) {
+    const select = await waitFor(() => findCoverageTemplateSelect(), required ? CFG.waitMs : 1500).catch(() => null);
+    return setMatSelectValue(select, wantedText, 'Coverage template', required);
+  }
+
+  async function setMatSelectValue(select, wantedText, label, required = true) {
     if (!select) {
-      if (required) throw new Error(`Select not found: ${ariaLabel}`);
-      log(`Skipped missing select: ${ariaLabel}`);
+      if (required) throw new Error(`Select not found: ${label}`);
+      log(`Skipped missing select: ${label}`);
       return false;
     }
     if (normalize(select.textContent).toLowerCase().includes(wantedText.toLowerCase())) {
-      log(`${ariaLabel} already ${wantedText}`);
+      log(`${label} already ${wantedText}`);
       return true;
     }
     select.click();
     const option = await waitFor(() => findOption(wantedText), 3000).catch(() => null);
     if (!option) {
       if (required) throw new Error(`Option not found: ${wantedText}`);
-      log(`Skipped missing option ${wantedText} for ${ariaLabel}`);
+      log(`Skipped missing option ${wantedText} for ${label}`);
       document.body.click();
       return false;
     }
     option.click();
     await sleep(350);
-    log(`Select set: ${ariaLabel} = ${wantedText}`);
+    log(`Select set: ${label} = ${wantedText}`);
     return true;
   }
 
@@ -133,10 +128,135 @@
       .find((el) => normalize(el.getAttribute('aria-label')).toLowerCase().includes(wanted));
   }
 
+  function findCoverageTemplateSelect() {
+    return document.querySelector('mat-select[formfieldmodifiedsegmentreporter="coverage_template"]') ||
+      [...document.querySelectorAll('mat-select')].find((el) => /standard|enhance/i.test(normalize(el.textContent)));
+  }
+
   function findOption(text) {
     const wanted = normalize(text).toLowerCase();
     return [...document.querySelectorAll('mat-option,[role="option"]')]
       .find((el) => normalize(el.textContent).toLowerCase().includes(wanted));
+  }
+
+  async function captureAllPricing() {
+    const scenarios = [
+      { field: 'Standard Pricing No Auto Discount', template: 'Standard', autoDiscount: false },
+      { field: 'Enhance Pricing No Auto Discount', template: 'Enhance', autoDiscount: false },
+      { field: 'Standard Pricing Auto Discount', template: 'Standard', autoDiscount: true },
+      { field: 'Enhance Pricing Auto Discount', template: 'Enhance', autoDiscount: true }
+    ];
+    const rowUpdates = {};
+    const runs = [];
+    let lastPrice = null;
+    let autoDiscountSeen = false;
+
+    for (const scenario of scenarios) {
+      const run = {
+        field: scenario.field,
+        template: scenario.template,
+        autoDiscount: scenario.autoDiscount,
+        ok: false,
+        amount: '',
+        error: ''
+      };
+
+      try {
+        log(`Pricing step: ${scenario.field}`);
+        await setCoverageTemplate(scenario.template, true);
+        await setHomeAutoDiscount(scenario.autoDiscount, true);
+        const price = await recalculateAndCapturePrice();
+        const amount = price.totalWithFees || price.termPremium || '';
+        lastPrice = price;
+        autoDiscountSeen = autoDiscountSeen || scenario.autoDiscount;
+
+        if (!price.valid || !amount) throw new Error(price.reason || 'price not found');
+        rowUpdates[scenario.field] = amount;
+        run.ok = true;
+        run.amount = amount;
+        log(`${scenario.field}: ${amount}`);
+      } catch (err) {
+        run.error = err?.message || String(err);
+        log(`Skipped ${scenario.field}: ${run.error}`);
+      }
+
+      runs.push(run);
+    }
+
+    return { rowUpdates, runs, lastPrice, autoDiscountSeen };
+  }
+
+  async function recalculateAndCapturePrice() {
+    const cta = document.querySelector('button[data-test-id="TUI_REVIEW_COVERAGE_CARD_CTA"]');
+    if (cta && !isDisabled(cta) && /recalculate|go|quote|update/i.test(normalize(cta.textContent))) {
+      clickElement(cta);
+      log(`Clicked quote CTA: ${normalize(cta.textContent) || 'button'}`);
+      await sleep(1500);
+    } else {
+      log('Quote CTA not available; reading current price');
+    }
+
+    return await waitFor(() => {
+      const price = capturePrice();
+      return price.valid ? price : null;
+    }, CFG.priceWaitMs).catch(() => capturePrice());
+  }
+
+  async function setHomeAutoDiscount(enabled, required = true) {
+    const control = findBundleDiscountControl('Home/Auto');
+    if (!control) {
+      if (!enabled) {
+        log('Home/Auto discount control not found; capturing no-auto price');
+        return true;
+      }
+      if (required) throw new Error('Home/Auto discount control not found');
+      log('Skipped missing Home/Auto discount control');
+      return false;
+    }
+
+    const current = getToggleState(control);
+    if (current === enabled) {
+      log(`Home/Auto discount already ${enabled ? 'on' : 'off'}`);
+      return true;
+    }
+    if (current == null && !enabled) {
+      log('Home/Auto discount state unknown; assuming off');
+      return true;
+    }
+
+    clickElement(findClickableToggle(control));
+    await sleep(500);
+    const after = getToggleState(control);
+    if (after === enabled || after == null) {
+      log(`Home/Auto discount set ${enabled ? 'on' : 'off'}`);
+      return true;
+    }
+
+    throw new Error(`Home/Auto discount did not switch ${enabled ? 'on' : 'off'}`);
+  }
+
+  function findBundleDiscountControl(label) {
+    const wantedId = `BUNDLE_DISCOUNT_${label}`;
+    return document.querySelector(`[data-test-id="${cssAttr(wantedId)}"]`) ||
+      [...document.querySelectorAll('[data-test-id]')].find((el) => normalize(el.getAttribute('data-test-id')).includes(wantedId));
+  }
+
+  function findClickableToggle(control) {
+    return control.querySelector('input[type="checkbox"], input[type="radio"], button, [role="checkbox"], [role="switch"]') || control;
+  }
+
+  function getToggleState(control) {
+    const input = control.matches?.('input[type="checkbox"], input[type="radio"]')
+      ? control
+      : control.querySelector('input[type="checkbox"], input[type="radio"]');
+    if (input) return !!input.checked;
+
+    const aria = control.getAttribute('aria-checked') || control.querySelector('[aria-checked]')?.getAttribute('aria-checked');
+    if (/^(true|false)$/i.test(String(aria || ''))) return /^true$/i.test(aria);
+
+    const classes = `${control.className || ''} ${control.querySelector('[class*="checked"], [class*="selected"], [class*="active"]')?.className || ''}`;
+    if (/\b(mat-mdc-checkbox-checked|mat-checkbox-checked|checked|selected|active)\b/i.test(classes)) return true;
+    return null;
   }
 
   function capturePrice() {
@@ -149,7 +269,7 @@
     const termPremium = money(main) || money(strike);
     const totalWithFees = money(captions.join(' '));
     const hasPlaceholder = /\$--|---|<\$-->|score err/i.test(text);
-    const valid = !!termPremium && !hasPlaceholder;
+    const valid = !!(totalWithFees || termPremium) && !hasPlaceholder;
     return {
       valid,
       termPremium,
@@ -167,8 +287,18 @@
       allPerils: currentSelectValue('Policy deductibles-All perils-'),
       splitWater: currentSelectValue('Policy deductibles-Split water-'),
       payPlan: normalize(document.querySelector('[data-test-id="TUI_REVIEW_COVERAGE_PAYPLAN_VALUE"]')?.textContent),
-      policyStartDate: normalize(document.querySelector('[data-test-id="TUI_REVIEW_COVERAGE_POLICY_DATE_VALUE"]')?.textContent)
+      policyStartDate: normalize(document.querySelector('[data-test-id="TUI_REVIEW_COVERAGE_POLICY_DATE_VALUE"]')?.textContent),
+      autoDiscount: detectAutoDiscount()
     };
+  }
+
+  function detectAutoDiscount() {
+    const direct = normalize(document.querySelector('[data-test-id*="AUTO"][data-test-id*="DISCOUNT"], [data-test-id*="Auto"][data-test-id*="Discount"]')?.textContent);
+    if (direct) return direct;
+
+    const text = normalize(document.body.textContent);
+    const match = text.match(/auto\s+discount\s*[:\-]?\s*(yes|no|applied|not applied|\$?\s*\d[\d,.]*%?)/i);
+    return match ? normalize(match[1]) : 'No';
   }
 
   function currentSelectValue(ariaLabel) {
@@ -192,7 +322,7 @@
   function normalizeMoney(token) {
     const digits = normalize(token).replace(/\$/g, '').replace(/\s+/g, '');
     if (!/\d/.test(digits)) return '';
-    return `$${digits}`;
+    return digits;
   }
 
   function updatePayload(rowUpdates, progressUpdates, ready, extraMeta) {
@@ -300,8 +430,8 @@
   }
 
   function bindPanel() {
-    state.panel.querySelector('#alta-home-coverage-run')?.addEventListener('click', () => runPage({ publish: true, clickQuote: true }));
-    state.panel.querySelector('#alta-home-coverage-capture')?.addEventListener('click', () => runPage({ publish: false, clickQuote: false }));
+    state.panel.querySelector('#alta-home-coverage-run')?.addEventListener('click', () => runPage({ publish: true }));
+    state.panel.querySelector('#alta-home-coverage-capture')?.addEventListener('click', () => runPage({ publish: false }));
     state.panel.querySelector('#alta-home-coverage-copy')?.addEventListener('click', copyLogs);
     makeDraggable(state.panel, KEYS.panelPos);
   }
@@ -377,6 +507,21 @@
     try { localStorage.setItem(key, JSON.stringify(value, null, 2)); } catch {}
   }
 
+  function clickElement(el) {
+    if (!el) return false;
+    try {
+      el.click();
+      return true;
+    } catch {}
+    const win = el.ownerDocument?.defaultView || window;
+    const MouseEventCtor = win.MouseEvent || MouseEvent;
+    return el.dispatchEvent(new MouseEventCtor('click', { bubbles: true, cancelable: true, composed: true }));
+  }
+
+  function isDisabled(el) {
+    return !!el?.disabled || el?.getAttribute?.('aria-disabled') === 'true' || el?.classList?.contains('disabled');
+  }
+
   function findByText(selector, text) {
     const wanted = normalize(text).toLowerCase();
     return [...document.querySelectorAll(selector)].find((el) => normalize(el.textContent).toLowerCase().includes(wanted));
@@ -418,5 +563,9 @@
 
   function normalize(value) {
     return String(value == null ? '' : value).replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+
+  function cssAttr(value) {
+    return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   }
 })();

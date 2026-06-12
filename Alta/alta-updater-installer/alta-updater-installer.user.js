@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Alta Quoting Updater Installer
 // @namespace    homebot.alta-updater-installer
-// @version      0.2.1
+// @version      0.2.2
 // @description  Opens the updater-only install links for the AgencyZoom, APEX, and Alta quoting workflow.
 // @author       OpenAI
 // @match        https://github.com/ugomez809/TamperMonkey-Automatic-Quote-New*
@@ -19,10 +19,8 @@
   'use strict';
 
   const UPDATERS = [
-    ['AgencyZoom Pipeline Keeper Updater', 'AgencyZoom/az-pipeline-keeper/az-pipeline-keeper-updater.user.js'],
     ['AgencyZoom Quote Launcher + Payload Grabber Updater', 'AgencyZoom/az-stage-runner/az-stage-runner-updater.user.js'],
     ['AgencyZoom Ticket Finisher + Tagger Updater', 'AgencyZoom/az-ticket-finisher-tagger/az-ticket-finisher-tagger-updater.user.js'],
-    ['AgencyZoom Zillow Ticket Enricher Updater', 'AgencyZoom/az-zillow-ticket-enricher/az-zillow-ticket-enricher-updater.user.js'],
     ['Cross-Origin Global Clear Launcher Updater', 'AgencyZoom/global-clear-launcher/global-clear-launcher-updater.user.js'],
     ['Cross-Origin Storage Tools Updater', 'AgencyZoom/storage-tools/storage-tools-updater.user.js'],
     ['Cross-Origin UI Dock Organizer Updater', 'Alta/ui-dock-organizer/ui-dock-organizer-updater.user.js'],

@@ -23,10 +23,8 @@ Active AgencyZoom scripts live in `AgencyZoom/`.
 
 | Folder | Purpose |
 | --- | --- |
-| `az-pipeline-keeper/` | Keeps the AgencyZoom pipeline tab alive and manages extra AgencyZoom/Zillow tabs. |
 | `az-stage-runner/` | Starts the Home quote workflow from AgencyZoom and publishes the job payload for APEX/Alta. |
 | `az-ticket-finisher-tagger/` | Reads the Alta final payload back in AgencyZoom, updates the ticket, adds the note/tag, and completes it. |
-| `az-zillow-ticket-enricher/` | Enriches AgencyZoom tickets with Zillow data before the quote workflow continues. |
 | `global-clear-launcher/` | Clears workflow storage and opens AgencyZoom, APEX, and Alta cleanly. |
 | `storage-tools/` | Exports, mirrors, and clears tracked AgencyZoom/APEX/Alta workflow storage. |
 

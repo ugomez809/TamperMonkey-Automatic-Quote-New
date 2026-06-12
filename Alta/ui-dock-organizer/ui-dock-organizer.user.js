@@ -82,8 +82,6 @@
     agencyzoom: [
       'az-stage-runner',
       'az-ticket-finisher-tagger',
-      'az-pipeline-keeper',
-      'az-zillow-ticket-enricher',
       'global-clear-launcher',
       'storage-tools',
       'alta-payload-bridge'
@@ -107,7 +105,6 @@
   const SCRIPT_PANEL_MAP = {
     'hb-az-stage-runner-panel': 'az-stage-runner',
     'tm-az-ticket-finisher-panel': 'az-ticket-finisher-tagger',
-    'tm-az-zillow-ticket-enricher-panel': 'az-zillow-ticket-enricher',
     'hb-global-clear-launcher-panel': 'global-clear-launcher',
     'tm-az-apex-alta-storage-tools-v160': 'storage-tools',
     'hb-apex-continue-panel': 'apex-continue-new-quote',

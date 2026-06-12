@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Alta Home Features
 // @namespace    homebot.alta-home-features
-// @version      0.1.0
-// @description  Manual Alta home-features page runner. Applies GWPC-equivalent safe defaults, leaves water leak protection untouched, and continues.
+// @version      0.1.1
+// @description  Manual Alta home-features page runner. Applies Alta safe defaults, leaves water leak protection untouched, and continues.
 // @author       OpenAI
 // @match        https://alta.farmers.com/quote/home/home-features*
 // @run-at       document-idle
@@ -19,7 +19,7 @@
   try { window.__ALTA_HOME_FEATURES_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'Alta Home Features';
-  const VERSION = '0.1.0';
+  const VERSION = '0.1.1';
   const KEYS = {
     currentJob: 'tm_alta_current_job_v1',
     payload: 'tm_alta_home_quote_grab_payload_v1',
@@ -238,7 +238,7 @@
   }
 
   function readJob() {
-    return readJson(KEYS.currentJob) || readJson('tm_pc_current_job_v1') || readJson('tm_shared_az_job_v1') || {};
+    return readJson(KEYS.currentJob) || readJson('tm_shared_az_job_v1') || {};
   }
 
   function fullName(job) {

@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Alta Payload Bridge
 // @namespace    homebot.alta-payload-bridge
-// @version      0.1.0
-// @description  Mirrors AgencyZoom/APEX job data into Alta and mirrors Alta home quote results back to AgencyZoom. Keeps GWPC-compatible final keys during migration.
+// @version      0.1.1
+// @description  Mirrors AgencyZoom/APEX job data into Alta and mirrors Alta home quote results back to AgencyZoom.
 // @author       OpenAI
 // @match        https://app.agencyzoom.com/*
 // @match        https://farmersagent.lightning.force.com/*
@@ -24,7 +24,7 @@
   try { window.__ALTA_PAYLOAD_BRIDGE_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'Alta Payload Bridge';
-  const VERSION = '0.1.0';
+  const VERSION = '0.1.1';
 
   const SHARED = {
     currentJob: 'tm_alta_bridge_current_job_v1',
@@ -45,10 +45,6 @@
     altaHomePayload: 'tm_alta_home_quote_grab_payload_v1',
     altaFinalPayload: 'tm_az_alta_final_payload_v1',
     altaFinalReady: 'tm_az_alta_final_payload_ready_v1',
-    compatPcCurrentJob: 'tm_pc_current_job_v1',
-    compatPcHomePayload: 'tm_pc_home_quote_grab_payload_v1',
-    compatAzFinalPayload: 'tm_az_gwpc_final_payload_v1',
-    compatAzFinalReady: 'tm_az_gwpc_final_payload_ready_v1',
     panelPos: 'tm_alta_payload_bridge_panel_pos_v1',
     logs: 'tm_alta_payload_bridge_logs_v1'
   };
@@ -131,18 +127,6 @@
     if (isFreshReady(finalReady) && finalPayload?.azId) {
       writeLocalJson(LOCAL.altaFinalPayload, finalPayload);
       writeLocalJson(LOCAL.altaFinalReady, finalReady);
-
-      const compat = toGwpcCompatibleFinal(finalPayload);
-      const compatReady = {
-        ready: true,
-        azId: finalPayload.azId,
-        savedAt: nowIso(),
-        signalPostedAt: normalizeText(finalPayload.signalPostedAt || finalPayload.savedAt || nowIso()),
-        signalKey: normalizeText(finalPayload.signalKey || `${finalPayload.azId}|${nowIso()}`),
-        source: 'Alta compatibility'
-      };
-      writeLocalJson(LOCAL.compatAzFinalPayload, compat);
-      writeLocalJson(LOCAL.compatAzFinalReady, compatReady);
       logOnce(`az-final-${finalReady.signalKey || finalReady.savedAt}`, `Wrote Alta final payload for AZ ${finalPayload.azId}`);
     }
   }
@@ -165,14 +149,12 @@
     if (sharedJob?.['AZ ID']) {
       const job = stripBridgeMeta(sharedJob);
       writeLocalJson(LOCAL.altaCurrentJob, job);
-      writeLocalJson(LOCAL.compatPcCurrentJob, job);
       logOnce(`alta-job-${job['AZ ID']}`, `Loaded job ${job['AZ ID']} into Alta (${reason})`);
     }
 
     const homePayload = readLocalJson(LOCAL.altaHomePayload);
     if (homePayload?.['AZ ID']) {
       writeShared(SHARED.homePayload, withBridgeMeta(homePayload, 'Alta home payload'));
-      writeLocalJson(LOCAL.compatPcHomePayload, toGwpcCompatibleHomePayload(homePayload));
       if (homePayload.ready) {
         const finalPayload = buildFinalPayload(homePayload);
         const finalReady = {
@@ -237,36 +219,6 @@
         bundleTimeout: { ready: false, events: [] },
         runtime: null,
         sentEvents: {}
-      }
-    };
-  }
-
-  function toGwpcCompatibleFinal(finalPayload) {
-    return {
-      ...finalPayload,
-      source: 'Alta',
-      bundle: {
-        ...(finalPayload.bundle || {}),
-        meta: {
-          ...(finalPayload?.bundle?.meta || {}),
-          stage: 'alta_compat_complete',
-          stageWriter: SCRIPT_NAME
-        }
-      }
-    };
-  }
-
-  function toGwpcCompatibleHomePayload(homePayload) {
-    return {
-      ...homePayload,
-      script: normalizeText(homePayload.script || 'Alta Home Quote Extractor'),
-      event: normalizeText(homePayload.event || 'home_quote_gathered'),
-      product: 'home',
-      page: homePayload.page || { url: location.href, title: document.title },
-      meta: {
-        ...(homePayload.meta || {}),
-        source: 'Alta compatibility payload',
-        lastWriter: normalizeText(homePayload.script || 'Alta Home Quote Extractor')
       }
     };
   }

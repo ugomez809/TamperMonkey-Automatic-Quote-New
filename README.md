@@ -52,6 +52,7 @@ Active Alta Home quote scripts live in `Alta/`.
 | `alta-replacement-cost/` | Runs on Alta replacement cost. |
 | `alta-home-coverage/` | Runs on Alta home coverage and publishes quote data. |
 | `alta-updater-installer/` | Opens only the active AgencyZoom/APEX/Alta updater install links. |
+| `ui-dock-organizer/` | Cross-origin UI fixer that keeps floating helper panels organized on AgencyZoom, APEX, and Alta. |
 
 The old GWPC folders are retired no-op stubs kept only so already-installed
 Tampermonkey scripts can update into harmless "safe to delete" scripts. They are

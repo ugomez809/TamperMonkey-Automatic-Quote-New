@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Alta Quoting Updater Installer
 // @namespace    homebot.alta-updater-installer
-// @version      0.2.0
+// @version      0.2.1
 // @description  Opens the updater-only install links for the AgencyZoom, APEX, and Alta quoting workflow.
 // @author       OpenAI
 // @match        https://github.com/ugomez809/TamperMonkey-Automatic-Quote-New*
@@ -25,6 +25,7 @@
     ['AgencyZoom Zillow Ticket Enricher Updater', 'AgencyZoom/az-zillow-ticket-enricher/az-zillow-ticket-enricher-updater.user.js'],
     ['Cross-Origin Global Clear Launcher Updater', 'AgencyZoom/global-clear-launcher/global-clear-launcher-updater.user.js'],
     ['Cross-Origin Storage Tools Updater', 'AgencyZoom/storage-tools/storage-tools-updater.user.js'],
+    ['Cross-Origin UI Dock Organizer Updater', 'Alta/ui-dock-organizer/ui-dock-organizer-updater.user.js'],
     ['APEX Home Quote Continue Updater', 'Apex-LEX/apex-continue-new-quote/apex-continue-new-quote-updater.user.js'],
     ['APEX Duplicate Check Continue Updater', 'Apex-LEX/apex-duplicates-continue/apex-duplicates-continue-updater.user.js'],
     ['APEX Multi-Agency Continue Updater', 'Apex-LEX/apex-multi-agency-continue/apex-multi-agency-continue-updater.user.js'],

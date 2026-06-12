@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Cross-Origin UI Dock Organizer
 // @namespace    homebot.ui-dock-organizer
-// @version      1.7.8
+// @version      1.7.9
 // @description  Organizes floating UIs safely inside the viewport. Biggest panel anchors bottom-right, others stack to the left within the anchor height, then continue upward on the right. On Alta, the organizer panel itself stays top-right. Includes active-script highlighting for opted-in panels.
 // @author       OpenAI
 // @match        https://app.agencyzoom.com/*
@@ -23,7 +23,7 @@
   try { window.__HB_UI_DOCK_ORGANIZER_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'Cross-Origin UI Dock Organizer';
-  const VERSION = '1.7.8';
+  const VERSION = '1.7.9';
 
   // Log-export integration - workflow-origin dynamic key.
   const LOG_PERSIST_KEY = (() => {
@@ -70,6 +70,8 @@
     countId: 'hb-ui-dock-organizer-count-v13',
     toggleId: 'hb-ui-dock-organizer-toggle-v13',
     hideId: 'hb-ui-dock-organizer-hide-v14',
+    moveId: 'hb-ui-dock-organizer-move-v16',
+    resetPosId: 'hb-ui-dock-organizer-reset-pos-v16',
     rescanId: 'hb-ui-dock-organizer-rescan-v13',
     logsBtnId: 'hb-ui-dock-organizer-logs-btn-v13',
     runtimeId: 'hb-ui-dock-organizer-runtime-v15',
@@ -128,6 +130,8 @@
     lastRescanAt: 0,
     lastDockedCount: -1,
     uiHidden: false,
+    moveMode: false,
+    savedPanelPos: false,
     activePanels: 0,
     runtimeCount: 0
   };
@@ -715,6 +719,12 @@
   function enforceOrganizerAnchor() {
     const panel = getOrganizerPanel();
     if (!panel) return;
+
+    if (state.drag || state.moveMode || restorePanelPos(panel)) {
+      clampPanelIntoViewport(panel);
+      return;
+    }
+
     if (isAgencyZoomOrigin()) {
       const profileAnchor = getAgencyZoomProfileAnchor();
       if (profileAnchor) {
@@ -956,7 +966,15 @@
         gap:8px;
         padding:8px 10px;
         background:rgba(255,255,255,.06);
+        cursor:default;
+      }
+      #${UI.panelId}.hb-ui-dock-moving{
+        outline:2px solid rgba(250,204,21,.85);
+        outline-offset:2px;
+      }
+      #${UI.panelId}.hb-ui-dock-moving #${UI.headId}{
         cursor:move;
+        background:rgba(250,204,21,.16);
       }
       #${UI.panelId} .title{ font-weight:700; }
       #${UI.panelId} .ver{ font-size:11px; opacity:.75; }
@@ -1033,8 +1051,15 @@
       #${UI.toggleId}.off{ background:#991b1b; }
       #${UI.hideId}.on{ background:#7c3aed; }
       #${UI.hideId}.off{ background:#0f766e; }
+      #${UI.moveId}.on{ background:#ca8a04; }
+      #${UI.moveId}.off{ background:#334155; }
+      #${UI.resetPosId}{ background:#475569; }
       #${UI.rescanId}{ background:#1d4ed8; }
       #${UI.logsBtnId}{ background:#374151; }
+      #${UI.panelId} button:disabled{
+        opacity:.45;
+        cursor:not-allowed;
+      }
       #${UI.logsWrapId}{
         display:none;
         margin-top:8px;
@@ -1079,6 +1104,10 @@
           <button id="${UI.rescanId}" type="button">RESCAN</button>
           <button id="${UI.logsBtnId}" type="button">LOGS</button>
         </div>
+        <div class="btns">
+          <button id="${UI.moveId}" class="off" type="button">MOVE</button>
+          <button id="${UI.resetPosId}" type="button">RESET POS</button>
+        </div>
         <div id="${UI.runtimeId}"></div>
         <div id="${UI.logsWrapId}">
           <div id="${UI.logsId}"></div>
@@ -1093,6 +1122,8 @@
   }
 
   function bindUI() {
+    makeDraggable(getOrganizerPanel(), document.getElementById(UI.headId));
+
     document.getElementById(UI.toggleId)?.addEventListener('click', () => {
       state.running = !state.running;
       log(state.running ? 'Organizer resumed' : 'Organizer stopped for this page session');
@@ -1107,6 +1138,34 @@
       log(state.uiHidden ? 'All docked UIs hidden' : 'All docked UIs shown');
       updateUI();
       if (!state.uiHidden && state.running) fullScanAndArrange();
+    });
+
+    document.getElementById(UI.moveId)?.addEventListener('click', () => {
+      const panel = getOrganizerPanel();
+      if (!panel) return;
+
+      if (!state.moveMode) {
+        state.moveMode = true;
+        pinPanelAtCurrentPosition(panel);
+        log('Organizer move mode enabled');
+      } else {
+        savePanelPos(panel);
+        state.moveMode = false;
+        log('Organizer position saved');
+      }
+
+      updateUI();
+      if (state.running) fullScanAndArrange();
+    });
+
+    document.getElementById(UI.resetPosId)?.addEventListener('click', () => {
+      state.moveMode = false;
+      endDrag();
+      clearPanelPos();
+      enforceOrganizerAnchor();
+      log('Organizer position reset');
+      updateUI();
+      if (state.running) fullScanAndArrange();
     });
 
     document.getElementById(UI.rescanId)?.addEventListener('click', () => {
@@ -1127,8 +1186,12 @@
     const count = document.getElementById(UI.countId);
     const toggle = document.getElementById(UI.toggleId);
     const hide = document.getElementById(UI.hideId);
+    const move = document.getElementById(UI.moveId);
+    const resetPos = document.getElementById(UI.resetPosId);
+    const panel = getOrganizerPanel();
     const runtimeEntries = buildRuntimeEntries(readScriptActivityMap());
     state.runtimeCount = runtimeEntries.length;
+    state.savedPanelPos = hasSavedPanelPos();
 
     if (status) {
       status.textContent = state.running ? 'RUNNING' : 'STOPPED';
@@ -1149,6 +1212,20 @@
       hide.textContent = state.uiHidden ? 'SHOW UI' : 'HIDE UI';
       hide.classList.toggle('on', state.uiHidden);
       hide.classList.toggle('off', !state.uiHidden);
+    }
+
+    if (move) {
+      move.textContent = state.moveMode ? 'SAVE POS' : 'MOVE';
+      move.classList.toggle('on', state.moveMode);
+      move.classList.toggle('off', !state.moveMode);
+    }
+
+    if (resetPos) {
+      resetPos.disabled = !state.savedPanelPos && !state.moveMode;
+    }
+
+    if (panel) {
+      panel.classList.toggle('hb-ui-dock-moving', state.moveMode);
     }
 
     renderRuntimeList(runtimeEntries);
@@ -1238,28 +1315,73 @@
     try { localStorage.setItem(CFG.hiddenKey, hidden ? '1' : '0'); } catch {}
   }
 
-  function restorePanelPos(panel) {
+  function getSavedPanelPos() {
     try {
       const raw = localStorage.getItem(CFG.posKey);
-      if (!raw) return;
+      if (!raw) return null;
       const pos = JSON.parse(raw);
-      if (!pos || typeof pos.left !== 'number' || typeof pos.top !== 'number') return;
+      if (!pos || typeof pos.left !== 'number' || typeof pos.top !== 'number') return null;
+      return pos;
+    } catch {
+      return null;
+    }
+  }
 
-      panel.style.left = `${Math.max(0, pos.left)}px`;
-      panel.style.top = `${Math.max(0, pos.top)}px`;
-      panel.style.right = 'auto';
-      panel.style.bottom = 'auto';
+  function hasSavedPanelPos() {
+    return !!getSavedPanelPos();
+  }
+
+  function applyPanelPos(panel, left, top) {
+    if (!panel) return;
+
+    const panelWidth = Math.max(1, panel.offsetWidth || 300);
+    const panelHeight = Math.max(1, panel.offsetHeight || 180);
+    const maxLeft = Math.max(CFG.sideGap, window.innerWidth - panelWidth - CFG.sideGap);
+    const maxTop = Math.max(CFG.topGap, window.innerHeight - panelHeight - CFG.bottomGap);
+
+    try {
+      panel.style.setProperty('position', 'fixed', 'important');
+      panel.style.setProperty('left', `${clamp(Math.round(left), CFG.sideGap, maxLeft)}px`, 'important');
+      panel.style.setProperty('top', `${clamp(Math.round(top), CFG.topGap, maxTop)}px`, 'important');
+      panel.style.setProperty('right', 'auto', 'important');
+      panel.style.setProperty('bottom', 'auto', 'important');
+      panel.style.setProperty('transform', 'none', 'important');
+      panel.style.setProperty('margin', '0', 'important');
     } catch {}
+  }
+
+  function restorePanelPos(panel) {
+    const pos = getSavedPanelPos();
+    if (!pos) return false;
+    applyPanelPos(panel, pos.left, pos.top);
+    return true;
+  }
+
+  function pinPanelAtCurrentPosition(panel) {
+    if (!panel) return;
+    const rect = panel.getBoundingClientRect();
+    if (!rect || rect.width <= 0 || rect.height <= 0) return;
+    applyPanelPos(panel, rect.left, rect.top);
+  }
+
+  function clampPanelIntoViewport(panel) {
+    pinPanelAtCurrentPosition(panel);
   }
 
   function savePanelPos(panel) {
     try {
       const rect = panel.getBoundingClientRect();
       localStorage.setItem(CFG.posKey, JSON.stringify({
-        left: rect.left,
-        top: rect.top
+        left: Math.round(rect.left),
+        top: Math.round(rect.top)
       }));
+      state.savedPanelPos = true;
     } catch {}
+  }
+
+  function clearPanelPos() {
+    try { localStorage.removeItem(CFG.posKey); } catch {}
+    state.savedPanelPos = false;
   }
 
   function makeDraggable(panel, handle) {
@@ -1268,6 +1390,7 @@
     handle.addEventListener('mousedown', (e) => {
       if (e.button !== 0) return;
       if (e.target.closest('button')) return;
+      if (!state.moveMode) return;
 
       const rect = panel.getBoundingClientRect();
       state.drag = {
@@ -1277,10 +1400,7 @@
         top: rect.top
       };
 
-      panel.style.left = `${rect.left}px`;
-      panel.style.top = `${rect.top}px`;
-      panel.style.right = 'auto';
-      panel.style.bottom = 'auto';
+      applyPanelPos(panel, rect.left, rect.top);
 
       document.body.style.userSelect = 'none';
       window.addEventListener('mousemove', onDragMove, true);
@@ -1299,21 +1419,23 @@
     const dx = e.clientX - state.drag.startX;
     const dy = e.clientY - state.drag.startY;
 
-    const nextLeft = Math.max(0, state.drag.left + dx);
-    const nextTop = Math.max(0, state.drag.top + dy);
-
-    panel.style.left = `${nextLeft}px`;
-    panel.style.top = `${nextTop}px`;
-    panel.style.right = 'auto';
-    panel.style.bottom = 'auto';
+    applyPanelPos(panel, state.drag.left + dx, state.drag.top + dy);
   }
 
   function onDragEnd() {
     const panel = document.getElementById(UI.panelId);
-    if (panel) savePanelPos(panel);
+    if (panel && state.moveMode) {
+      savePanelPos(panel);
+      updateUI();
+      if (state.running) fullScanAndArrange();
+    }
 
+    endDrag();
+  }
+
+  function endDrag() {
     state.drag = null;
-    document.body.style.userSelect = '';
+    try { document.body.style.userSelect = ''; } catch {}
     window.removeEventListener('mousemove', onDragMove, true);
     window.removeEventListener('mouseup', onDragEnd, true);
   }

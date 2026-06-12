@@ -30,8 +30,9 @@ Tampermonkey `@updateURL` and `@downloadURL` pointed at the matching raw GitHub
 path in this repo.
 
 `alta-updater-installer` is a helper installer only. It opens the updater-only
-install links so the workflow can be installed by installing updater scripts
-instead of installing both updater and main scripts manually.
+install links for the hosted APEX and Alta quoting scripts so the workflow can
+be installed by installing updater scripts instead of installing both updater
+and main scripts manually.
 
 ## Selector Notes
 

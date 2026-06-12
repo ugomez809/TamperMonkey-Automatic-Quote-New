@@ -17,6 +17,12 @@ The Alta-side scripts for this project should run only on these Home quote pages
 
 ## Layout
 
+### Apex-LEX
+
+| Folder | Purpose |
+| --- | --- |
+| `apex-continue-new-quote/` | Continues the APEX Home quote flow. The Alta-ineligible checkbox auto-click has been removed. |
+
 ### Alta
 
 Active Home quote scripts live in `Alta/`.
@@ -43,6 +49,6 @@ The Tampermonkey `@updateURL` and `@downloadURL` values point at this repo under
 
 ## Updater-Only Installer
 
-Use this single installer to open the updater script install tabs:
+Use this single installer to open the updater script install tabs for the hosted APEX and Alta quoting scripts:
 
 `https://raw.githubusercontent.com/ugomez809/TamperMonkey-Automatic-Quote-New/main/Alta/alta-updater-installer/alta-updater-installer.user.js`

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Alta Quoting Updater Installer
 // @namespace    homebot.alta-updater-installer
-// @version      0.1.0
+// @version      0.1.1
 // @description  Opens the updater-only install links for the Alta quoting project.
 // @author       OpenAI
 // @match        https://github.com/ugomez809/TamperMonkey-Automatic-Quote-New*
@@ -19,25 +19,26 @@
   'use strict';
 
   const UPDATERS = [
-    ['Alta Payload Bridge Updater', 'alta-payload-bridge/alta-payload-bridge-updater.user.js'],
-    ['Alta Customer Info Updater', 'alta-customer-info/alta-customer-info-updater.user.js'],
-    ['Alta Home Features Updater', 'alta-home-features/alta-home-features-updater.user.js'],
-    ['Alta Replacement Cost Updater', 'alta-replacement-cost/alta-replacement-cost-updater.user.js'],
-    ['Alta Home Coverage Updater', 'alta-home-coverage/alta-home-coverage-updater.user.js'],
-    ['GWPC Dwelling Water Rule Updater', 'dwelling-water-rule/dwelling-water-rule-updater.user.js'],
-    ['GWPC Unsaved Change Discard Clicker Updater', 'gwpc-discard-unsaved-change/gwpc-discard-unsaved-change-updater.user.js'],
-    ['GWPC Disclosure Qualification Updater', 'gwpc-disclosure-qualification/gwpc-disclosure-qualification-updater.user.js'],
-    ['GWPC Header Timeout Monitor Updater', 'gwpc-header-timeout/gwpc-header-timeout-updater.user.js'],
-    ['GWPC Home Coverages + Risk Analysis Updater', 'gwpc-home-coverages-risk-analysis/gwpc-home-coverages-risk-analysis-updater.user.js'],
-    ['GWPC Policy Info Prefill Updater', 'gwpc-policy-info/gwpc-policy-info-updater.user.js'],
-    ['GWPC Popup Blocker Updater', 'gwpc-popup-blocker/gwpc-popup-blocker-updater.user.js'],
-    ['GWPC Home Quote Extractor Updater', 'home-quote-grabber/home-quote-grabber-updater.user.js'],
-    ['GWPC Payload Mirror + Non-AZ Tab Closer Updater', 'payload-mirror-non-az-tab-closer/payload-mirror-non-az-tab-closer-updater.user.js'],
-    ['Cross-Origin UI Dock Organizer Updater', 'ui-dock-organizer/ui-dock-organizer-updater.user.js'],
-    ['GWPC Webhook Submission Updater', 'webhook-submission/webhook-submission-updater.user.js']
+    ['APEX Home Quote Continue Updater', 'Apex-LEX/apex-continue-new-quote/apex-continue-new-quote-updater.user.js'],
+    ['Alta Payload Bridge Updater', 'Alta/alta-payload-bridge/alta-payload-bridge-updater.user.js'],
+    ['Alta Customer Info Updater', 'Alta/alta-customer-info/alta-customer-info-updater.user.js'],
+    ['Alta Home Features Updater', 'Alta/alta-home-features/alta-home-features-updater.user.js'],
+    ['Alta Replacement Cost Updater', 'Alta/alta-replacement-cost/alta-replacement-cost-updater.user.js'],
+    ['Alta Home Coverage Updater', 'Alta/alta-home-coverage/alta-home-coverage-updater.user.js'],
+    ['GWPC Dwelling Water Rule Updater', 'Alta/dwelling-water-rule/dwelling-water-rule-updater.user.js'],
+    ['GWPC Unsaved Change Discard Clicker Updater', 'Alta/gwpc-discard-unsaved-change/gwpc-discard-unsaved-change-updater.user.js'],
+    ['GWPC Disclosure Qualification Updater', 'Alta/gwpc-disclosure-qualification/gwpc-disclosure-qualification-updater.user.js'],
+    ['GWPC Header Timeout Monitor Updater', 'Alta/gwpc-header-timeout/gwpc-header-timeout-updater.user.js'],
+    ['GWPC Home Coverages + Risk Analysis Updater', 'Alta/gwpc-home-coverages-risk-analysis/gwpc-home-coverages-risk-analysis-updater.user.js'],
+    ['GWPC Policy Info Prefill Updater', 'Alta/gwpc-policy-info/gwpc-policy-info-updater.user.js'],
+    ['GWPC Popup Blocker Updater', 'Alta/gwpc-popup-blocker/gwpc-popup-blocker-updater.user.js'],
+    ['GWPC Home Quote Extractor Updater', 'Alta/home-quote-grabber/home-quote-grabber-updater.user.js'],
+    ['GWPC Payload Mirror + Non-AZ Tab Closer Updater', 'Alta/payload-mirror-non-az-tab-closer/payload-mirror-non-az-tab-closer-updater.user.js'],
+    ['Cross-Origin UI Dock Organizer Updater', 'Alta/ui-dock-organizer/ui-dock-organizer-updater.user.js'],
+    ['GWPC Webhook Submission Updater', 'Alta/webhook-submission/webhook-submission-updater.user.js']
   ];
 
-  const RAW_BASE = 'https://raw.githubusercontent.com/ugomez809/TamperMonkey-Automatic-Quote-New/main/Alta';
+  const RAW_BASE = 'https://raw.githubusercontent.com/ugomez809/TamperMonkey-Automatic-Quote-New/main';
   const INSTALL_DELAY_MS = 450;
 
   registerMenu();
@@ -71,7 +72,7 @@
     ].join(';');
 
     root.innerHTML = [
-      '<div style="font-weight:700;font-size:15px;margin-bottom:6px;">Alta updater installer</div>',
+      '<div style="font-weight:700;font-size:15px;margin-bottom:6px;">Quote updater installer</div>',
       `<div style="margin-bottom:10px;">Opens ${UPDATERS.length} updater-only Tampermonkey install tabs.</div>`,
       '<div style="display:flex;gap:8px;align-items:center;">',
       '<button type="button" data-action="open" style="flex:1;border:0;border-radius:6px;background:#1868db;color:#fff;font-weight:700;padding:8px 10px;cursor:pointer;">Open updaters</button>',

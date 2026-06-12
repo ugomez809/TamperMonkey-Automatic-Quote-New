@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Alta Customer Info
 // @namespace    homebot.alta-customer-info
-// @version      0.1.3
+// @version      0.1.4
 // @description  Manual Alta customer-info page runner. Sets today's policy start date, confirms default customer questions, acknowledges disclosures, and continues.
 // @author       OpenAI
 // @match        https://alta.farmers.com/quote/auto/personal-info*
@@ -19,7 +19,7 @@
   try { window.__ALTA_CUSTOMER_INFO_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'Alta Customer Info';
-  const VERSION = '0.1.3';
+  const VERSION = '0.1.4';
   const KEYS = {
     currentJob: 'tm_alta_current_job_v1',
     payload: 'tm_alta_home_quote_grab_payload_v1',
@@ -69,9 +69,15 @@
       step = 'setting primary residence';
       await clickRadio('Is the home their current or soon-to-be primary residence?', 'yes', false);
       step = 'setting business owner';
-      await clickRadio('Is the customer a business owner?', 'no', false);
+      await clickRadio({
+        label: 'Is the customer a business owner?',
+        fieldClass: 'isCustomerBusinessOwner'
+      }, 'no', true);
       step = 'setting specialty units';
-      await clickRadio('Does the customer own any specialty units?', 'no', false);
+      await clickRadio({
+        label: 'Does the customer own any specialty units?',
+        fieldClass: 'doesCustomerOwnSpecialtyVehicles'
+      }, 'no', true);
 
       step = 'updating payload';
       updatePayload({
@@ -112,27 +118,65 @@
   }
 
   async function clickRadio(groupLabel, value, required = true) {
+    const labelText = typeof groupLabel === 'object' ? groupLabel.label : groupLabel;
     const group = await waitFor(() => findRadioGroup(groupLabel), required ? CFG.waitMs : 1500).catch(() => null);
     if (!group) {
-      if (required) throw new Error(`Radio group not found: ${groupLabel}`);
-      log(`Skipped missing radio group: ${groupLabel}`);
+      if (required) throw new Error(`Radio group not found: ${labelText}`);
+      log(`Skipped missing radio group: ${labelText}`);
       return false;
     }
-    const input = group.querySelector(`input[type="radio"][value="${cssEscape(value)}"]`);
+    const input = findRadioInput(group, value);
     if (!input) {
-      if (required) throw new Error(`Radio value ${value} not found for ${groupLabel}`);
-      log(`Skipped missing radio value ${value}: ${groupLabel}`);
+      if (required) throw new Error(`Radio value ${value} not found for ${labelText}`);
+      log(`Skipped missing radio value ${value}: ${labelText}`);
       return false;
     }
-    if (!input.checked) clickElement(input.closest('mat-radio-button') || input);
-    await sleep(150);
-    log(`Radio set: ${groupLabel} = ${value}`);
+    if (!input.checked) {
+      const radio = input.closest('mat-radio-button') || input;
+      const target = findRadioClickTarget(radio, input);
+      try { target.scrollIntoView?.({ block: 'center', inline: 'nearest' }); } catch {}
+      clickElement(target);
+      await sleep(250);
+      if (!input.checked) {
+        clickElement(input);
+        dispatchInputEvents(input);
+        await sleep(250);
+      }
+    }
+    if (!input.checked) {
+      if (required) throw new Error(`Radio value ${value} did not stick for ${labelText}`);
+      log(`Radio did not stick: ${labelText} = ${value}`);
+      return false;
+    }
+    log(`Radio set: ${labelText} = ${value}`);
     return true;
   }
 
-  function findRadioGroup(label) {
+  function findRadioGroup(target) {
+    const label = typeof target === 'object' ? target.label : target;
+    const fieldClass = typeof target === 'object' ? target.fieldClass : '';
     const wanted = normalize(label).toLowerCase();
-    return [...document.querySelectorAll('mat-radio-group')].find((group) => normalize(group.getAttribute('aria-label')).toLowerCase().includes(wanted));
+    const groups = [...document.querySelectorAll('mat-radio-group')];
+    if (fieldClass) {
+      const byClass = document.querySelector(`.${cssEscape(fieldClass)} mat-radio-group`);
+      if (byClass) return byClass;
+    }
+    return groups.find((group) => normalize(group.getAttribute('aria-label')).toLowerCase().includes(wanted)) ||
+      groups.find((group) => normalize(group.closest('.dynamic-personal-info-field-item, .dynamic-grid-label-and-field, form')?.textContent).toLowerCase().includes(wanted));
+  }
+
+  function findRadioInput(group, value) {
+    const wanted = normalize(value).toLowerCase();
+    return [...group.querySelectorAll('input[type="radio"]')].find((input) => normalize(input.value).toLowerCase() === wanted) ||
+      [...group.querySelectorAll('mat-radio-button')].find((radio) => normalize(radio.textContent).toLowerCase() === wanted)?.querySelector('input[type="radio"]');
+  }
+
+  function findRadioClickTarget(radio, input) {
+    if (input?.id) {
+      const label = radio.querySelector(`label[for="${cssAttr(input.id)}"]`);
+      if (label) return label;
+    }
+    return radio.querySelector('.mat-mdc-radio-touch-target, .mdc-radio, label') || radio || input;
   }
 
   function updatePayload(rowUpdates, progressUpdates) {
@@ -400,5 +444,9 @@
   function cssEscape(value) {
     if (window.CSS?.escape) return CSS.escape(value);
     return String(value).replace(/"/g, '\\"');
+  }
+
+  function cssAttr(value) {
+    return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   }
 })();

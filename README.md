@@ -25,27 +25,26 @@ The Alta-side scripts for this project should run only on these Home quote pages
 
 ### Alta
 
-Active Home quote scripts live in `Alta/`.
+Active Alta Home quote scripts live in `Alta/`.
 
 | Folder | Purpose |
 | --- | --- |
-| `dwelling-water-rule/` | Handles the Home Dwelling step and dwelling-related rule actions. |
-| `gwpc-discard-unsaved-change/` | Clicks the GWPC discard-unsaved-change action when it appears. |
-| `gwpc-disclosure-qualification/` | Handles Home Disclosure & Qualification. |
-| `gwpc-header-timeout/` | Monitors GWPC header/page timeout behavior and retry/send signals. |
-| `gwpc-home-coverages-risk-analysis/` | Deprecated stub retained for updater compatibility. |
-| `gwpc-policy-info/` | Handles Home Policy Info fields and navigation. |
-| `gwpc-popup-blocker/` | Blocks GWPC popup, confirm, prompt, and unload interruptions. |
-| `home-quote-grabber/` | Captures Home quote, dwelling, coverage, and pricing payload data. |
-| `payload-mirror-non-az-tab-closer/` | Mirrors final Home payload across tabs and closes non-AZ tabs after success. |
-| `ui-dock-organizer/` | Organizes floating automation panels across AgencyZoom, Apex/LEX, and GWPC. |
-| `webhook-submission/` | Sends the final Home quote payload to the configured webhook. |
+| `alta-payload-bridge/` | Mirrors AgencyZoom/APEX job data into Alta and returns Alta quote results to AgencyZoom. |
+| `alta-customer-info/` | Runs on Alta customer information. |
+| `alta-home-features/` | Runs on Alta home features. |
+| `alta-replacement-cost/` | Runs on Alta replacement cost. |
+| `alta-home-coverage/` | Runs on Alta home coverage and publishes quote data. |
+| `alta-updater-installer/` | Opens only the active APEX/Alta updater install links. |
+
+The old GWPC folders are retired no-op stubs kept only so already-installed
+Tampermonkey scripts can update into harmless "safe to delete" scripts. They are
+not part of the workflow and are not opened by the installer.
 
 ## Update URLs
 
-The Tampermonkey `@updateURL` and `@downloadURL` values point at this repo under:
+The active Tampermonkey `@updateURL` and `@downloadURL` values point at this repo under:
 
-`https://raw.githubusercontent.com/ugomez809/TamperMonkey-Automatic-Quote-New/main/Alta/...`
+`https://raw.githubusercontent.com/ugomez809/TamperMonkey-Automatic-Quote-New/main/...`
 
 ## Updater-Only Installer
 

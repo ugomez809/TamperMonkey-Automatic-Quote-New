@@ -34,6 +34,11 @@ install links for the hosted APEX and Alta quoting scripts so the workflow can
 be installed by installing updater scripts instead of installing both updater
 and main scripts manually.
 
+Old GWPC script folders in this repo are retired no-op stubs only. They remain
+published so already-installed Tampermonkey copies can update into harmless
+`RETIRED` scripts, then be deleted from Tampermonkey. They are not part of the
+Alta workflow and are not included in the installer.
+
 ## Selector Notes
 
 - Angular Material IDs such as `mat-select-342` are dynamic and should be used

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Cross-Origin UI Dock Organizer
 // @namespace    homebot.ui-dock-organizer
-// @version      1.7.9
+// @version      1.7.10
 // @description  Organizes floating UIs safely inside the viewport. Biggest panel anchors bottom-right, others stack to the left within the anchor height, then continue upward on the right. On Alta, the organizer panel itself stays top-right. Includes active-script highlighting for opted-in panels.
 // @author       OpenAI
 // @match        https://app.agencyzoom.com/*
@@ -23,7 +23,7 @@
   try { window.__HB_UI_DOCK_ORGANIZER_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'Cross-Origin UI Dock Organizer';
-  const VERSION = '1.7.9';
+  const VERSION = '1.7.10';
 
   // Log-export integration - workflow-origin dynamic key.
   const LOG_PERSIST_KEY = (() => {
@@ -57,7 +57,7 @@
 
     maxLogs: 12,
     uiZ: 2147483647,
-    posKey: 'tm_ui_dock_organizer_panel_pos_v13',
+    dockPosKey: 'tm_ui_dock_organizer_docked_ui_pos_v17',
     logsOpenKey: 'tm_ui_dock_organizer_logs_open_v13',
     hiddenKey: 'tm_ui_dock_organizer_hidden_v14',
     activeStaleMs: 6000
@@ -131,7 +131,7 @@
     lastDockedCount: -1,
     uiHidden: false,
     moveMode: false,
-    savedPanelPos: false,
+    savedDockLayout: false,
     activePanels: 0,
     runtimeCount: 0
   };
@@ -494,6 +494,18 @@
     applyActiveHighlights(items);
     updateUI();
 
+    if (state.moveMode || hasSavedDockPositions()) {
+      applyDockedUiPositionMode(items);
+      requestAnimationFrame(() => {
+        for (const item of items) {
+          clampElementIntoViewport(item.el);
+        }
+      });
+      return;
+    }
+
+    setDockMoveTargets(items, false);
+
     const placements = buildPlacements(items);
 
     for (const p of placements) {
@@ -647,6 +659,83 @@
     } catch {}
   }
 
+  function applyDockedUiPositionMode(items) {
+    const saved = loadDockPositions();
+
+    for (const item of items) {
+      const key = getDockPositionKey(item);
+      bindDockItemDrag(item.el);
+      item.el.classList.toggle('hb-ui-dock-move-target', state.moveMode);
+
+      const pos = key ? saved[key] : null;
+      if (pos && typeof pos.left === 'number' && typeof pos.top === 'number') {
+        applyPanelPos(item.el, pos.left, pos.top);
+      } else if (state.moveMode) {
+        pinPanelAtCurrentPosition(item.el);
+      }
+    }
+  }
+
+  function setDockMoveTargets(items, enabled) {
+    for (const item of items || []) {
+      if (item?.el?.classList) item.el.classList.toggle('hb-ui-dock-move-target', !!enabled);
+    }
+  }
+
+  function getDockPositionKey(itemOrEl) {
+    const el = itemOrEl?.el || itemOrEl;
+    if (!(el instanceof HTMLElement)) return '';
+
+    const scriptId = normalizeText(itemOrEl?.scriptId || detectScriptId(el));
+    if (scriptId) return `script:${scriptId}`;
+
+    const id = normalizeText(el.id || '');
+    if (id) return `id:${id}`;
+
+    return '';
+  }
+
+  function loadDockPositions() {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(CFG.dockPosKey) || '{}');
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  function hasSavedDockPositions() {
+    return Object.keys(loadDockPositions()).length > 0;
+  }
+
+  function saveDockPositions(items = getDockItems()) {
+    const next = {};
+
+    for (const item of items) {
+      const key = getDockPositionKey(item);
+      if (!key || !item.el?.isConnected) continue;
+
+      const rect = item.el.getBoundingClientRect();
+      if (!rect || rect.width <= 0 || rect.height <= 0) continue;
+
+      next[key] = {
+        left: Math.round(rect.left),
+        top: Math.round(rect.top),
+        id: item.el.id || '',
+        scriptId: item.scriptId || ''
+      };
+    }
+
+    try { localStorage.setItem(CFG.dockPosKey, JSON.stringify(next)); } catch {}
+    state.savedDockLayout = Object.keys(next).length > 0;
+    return state.savedDockLayout;
+  }
+
+  function clearDockPositions() {
+    try { localStorage.removeItem(CFG.dockPosKey); } catch {}
+    state.savedDockLayout = false;
+  }
+
   function isOrganizerPanel(el) {
     return !!(el && el.id === UI.panelId);
   }
@@ -719,11 +808,6 @@
   function enforceOrganizerAnchor() {
     const panel = getOrganizerPanel();
     if (!panel) return;
-
-    if (state.drag || state.moveMode || restorePanelPos(panel)) {
-      clampPanelIntoViewport(panel);
-      return;
-    }
 
     if (isAgencyZoomOrigin()) {
       const profileAnchor = getAgencyZoomProfileAnchor();
@@ -973,8 +1057,21 @@
         outline-offset:2px;
       }
       #${UI.panelId}.hb-ui-dock-moving #${UI.headId}{
-        cursor:move;
+        cursor:default;
         background:rgba(250,204,21,.16);
+      }
+      .hb-ui-dock-move-target{
+        outline:2px solid rgba(250,204,21,.85) !important;
+        outline-offset:2px !important;
+        cursor:move !important;
+      }
+      .hb-ui-dock-move-target button,
+      .hb-ui-dock-move-target input,
+      .hb-ui-dock-move-target textarea,
+      .hb-ui-dock-move-target select,
+      .hb-ui-dock-move-target a,
+      .hb-ui-dock-move-target [role="button"]{
+        cursor:auto !important;
       }
       #${UI.panelId} .title{ font-weight:700; }
       #${UI.panelId} .ver{ font-size:11px; opacity:.75; }
@@ -1105,7 +1202,7 @@
           <button id="${UI.logsBtnId}" type="button">LOGS</button>
         </div>
         <div class="btns">
-          <button id="${UI.moveId}" class="off" type="button">MOVE</button>
+          <button id="${UI.moveId}" class="off" type="button">MOVE UIs</button>
           <button id="${UI.resetPosId}" type="button">RESET POS</button>
         </div>
         <div id="${UI.runtimeId}"></div>
@@ -1122,8 +1219,6 @@
   }
 
   function bindUI() {
-    makeDraggable(getOrganizerPanel(), document.getElementById(UI.headId));
-
     document.getElementById(UI.toggleId)?.addEventListener('click', () => {
       state.running = !state.running;
       log(state.running ? 'Organizer resumed' : 'Organizer stopped for this page session');
@@ -1141,17 +1236,14 @@
     });
 
     document.getElementById(UI.moveId)?.addEventListener('click', () => {
-      const panel = getOrganizerPanel();
-      if (!panel) return;
-
       if (!state.moveMode) {
         state.moveMode = true;
-        pinPanelAtCurrentPosition(panel);
-        log('Organizer move mode enabled');
+        log('Docked UI move mode enabled');
       } else {
-        savePanelPos(panel);
+        const saved = saveDockPositions();
         state.moveMode = false;
-        log('Organizer position saved');
+        endDrag();
+        log(saved ? 'Docked UI positions saved' : 'No docked UI positions to save');
       }
 
       updateUI();
@@ -1161,9 +1253,11 @@
     document.getElementById(UI.resetPosId)?.addEventListener('click', () => {
       state.moveMode = false;
       endDrag();
-      clearPanelPos();
-      enforceOrganizerAnchor();
-      log('Organizer position reset');
+      clearDockPositions();
+      for (const item of getDockItems()) {
+        item.el.classList.remove('hb-ui-dock-move-target');
+      }
+      log('Docked UI positions reset');
       updateUI();
       if (state.running) fullScanAndArrange();
     });
@@ -1191,7 +1285,7 @@
     const panel = getOrganizerPanel();
     const runtimeEntries = buildRuntimeEntries(readScriptActivityMap());
     state.runtimeCount = runtimeEntries.length;
-    state.savedPanelPos = hasSavedPanelPos();
+    state.savedDockLayout = hasSavedDockPositions();
 
     if (status) {
       status.textContent = state.running ? 'RUNNING' : 'STOPPED';
@@ -1215,13 +1309,13 @@
     }
 
     if (move) {
-      move.textContent = state.moveMode ? 'SAVE POS' : 'MOVE';
+      move.textContent = state.moveMode ? 'SAVE UIs' : 'MOVE UIs';
       move.classList.toggle('on', state.moveMode);
       move.classList.toggle('off', !state.moveMode);
     }
 
     if (resetPos) {
-      resetPos.disabled = !state.savedPanelPos && !state.moveMode;
+      resetPos.disabled = !state.savedDockLayout && !state.moveMode;
     }
 
     if (panel) {
@@ -1315,22 +1409,6 @@
     try { localStorage.setItem(CFG.hiddenKey, hidden ? '1' : '0'); } catch {}
   }
 
-  function getSavedPanelPos() {
-    try {
-      const raw = localStorage.getItem(CFG.posKey);
-      if (!raw) return null;
-      const pos = JSON.parse(raw);
-      if (!pos || typeof pos.left !== 'number' || typeof pos.top !== 'number') return null;
-      return pos;
-    } catch {
-      return null;
-    }
-  }
-
-  function hasSavedPanelPos() {
-    return !!getSavedPanelPos();
-  }
-
   function applyPanelPos(panel, left, top) {
     if (!panel) return;
 
@@ -1350,13 +1428,6 @@
     } catch {}
   }
 
-  function restorePanelPos(panel) {
-    const pos = getSavedPanelPos();
-    if (!pos) return false;
-    applyPanelPos(panel, pos.left, pos.top);
-    return true;
-  }
-
   function pinPanelAtCurrentPosition(panel) {
     if (!panel) return;
     const rect = panel.getBoundingClientRect();
@@ -1364,68 +1435,62 @@
     applyPanelPos(panel, rect.left, rect.top);
   }
 
-  function clampPanelIntoViewport(panel) {
-    pinPanelAtCurrentPosition(panel);
+  function bindDockItemDrag(el) {
+    if (!(el instanceof HTMLElement)) return;
+    if (el.dataset.hbUiDockDragBound === '1') return;
+    el.dataset.hbUiDockDragBound = '1';
+    el.addEventListener('mousedown', onDockItemDragStart, true);
   }
 
-  function savePanelPos(panel) {
-    try {
-      const rect = panel.getBoundingClientRect();
-      localStorage.setItem(CFG.posKey, JSON.stringify({
-        left: Math.round(rect.left),
-        top: Math.round(rect.top)
-      }));
-      state.savedPanelPos = true;
-    } catch {}
+  function isInteractiveDragTarget(target) {
+    return !!target?.closest?.('button, input, textarea, select, option, a, [role="button"], [contenteditable="true"]');
   }
 
-  function clearPanelPos() {
-    try { localStorage.removeItem(CFG.posKey); } catch {}
-    state.savedPanelPos = false;
-  }
+  function onDockItemDragStart(e) {
+    if (!state.moveMode) return;
+    if (e.button !== 0) return;
+    if (isInteractiveDragTarget(e.target)) return;
 
-  function makeDraggable(panel, handle) {
-    if (!panel || !handle) return;
+    const el = e.currentTarget;
+    if (!(el instanceof HTMLElement) || !el.isConnected || isOrganizerPanel(el)) return;
 
-    handle.addEventListener('mousedown', (e) => {
-      if (e.button !== 0) return;
-      if (e.target.closest('button')) return;
-      if (!state.moveMode) return;
+    const rect = el.getBoundingClientRect();
+    if (!rect || rect.width <= 0 || rect.height <= 0) return;
 
-      const rect = panel.getBoundingClientRect();
-      state.drag = {
-        startX: e.clientX,
-        startY: e.clientY,
-        left: rect.left,
-        top: rect.top
-      };
+    state.drag = {
+      el,
+      startX: e.clientX,
+      startY: e.clientY,
+      left: rect.left,
+      top: rect.top
+    };
 
-      applyPanelPos(panel, rect.left, rect.top);
+    applyPanelPos(el, rect.left, rect.top);
 
-      document.body.style.userSelect = 'none';
-      window.addEventListener('mousemove', onDragMove, true);
-      window.addEventListener('mouseup', onDragEnd, true);
+    document.body.style.userSelect = 'none';
+    window.addEventListener('mousemove', onDragMove, true);
+    window.addEventListener('mouseup', onDragEnd, true);
 
-      e.preventDefault();
-    });
+    e.preventDefault();
+    e.stopPropagation();
   }
 
   function onDragMove(e) {
     if (!state.drag) return;
 
-    const panel = document.getElementById(UI.panelId);
-    if (!panel) return;
+    const el = state.drag.el;
+    if (!el || !el.isConnected) return;
 
     const dx = e.clientX - state.drag.startX;
     const dy = e.clientY - state.drag.startY;
 
-    applyPanelPos(panel, state.drag.left + dx, state.drag.top + dy);
+    applyPanelPos(el, state.drag.left + dx, state.drag.top + dy);
+    e.preventDefault();
   }
 
   function onDragEnd() {
-    const panel = document.getElementById(UI.panelId);
-    if (panel && state.moveMode) {
-      savePanelPos(panel);
+    if (state.moveMode) {
+      saveDockPositions();
       updateUI();
       if (state.running) fullScanAndArrange();
     }

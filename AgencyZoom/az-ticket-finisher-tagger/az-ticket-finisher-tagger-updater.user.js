@@ -1,30 +1,31 @@
 // ==UserScript==
-// @name         APEX Home Quote Continue Updater
-// @namespace    homebot.apex-continue-new-quote.updater
+// @name         AgencyZoom Ticket Finisher + Tagger Updater
+// @namespace    homebot.az-ticket-finisher-tagger.updater
 // @version      0.1.1
-// @description  Loads and auto-updates the APEX Home Quote Continue script from GitHub.
+// @description  Loads and auto-updates the AgencyZoom Ticket Finisher + Tagger script from GitHub.
 // @author       OpenAI
-// @match        https://farmersagent.lightning.force.com/*
-// @run-at       document-idle
+// @match        https://app.agencyzoom.com/*
+// @match        https://app.agencyzoom.com/referral/pipeline*
+// @run-at       document-end
+// @noframes     
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_deleteValue
 // @grant        GM_registerMenuCommand
-// @grant        unsafeWindow
 // @connect      raw.githubusercontent.com
-// @updateURL    https://raw.githubusercontent.com/ugomez809/TamperMonkey-Automatic-Quote-New/main/Apex-LEX/apex-continue-new-quote/apex-continue-new-quote-updater.user.js
-// @downloadURL  https://raw.githubusercontent.com/ugomez809/TamperMonkey-Automatic-Quote-New/main/Apex-LEX/apex-continue-new-quote/apex-continue-new-quote-updater.user.js
+// @updateURL    https://raw.githubusercontent.com/ugomez809/TamperMonkey-Automatic-Quote-New/main/AgencyZoom/az-ticket-finisher-tagger/az-ticket-finisher-tagger-updater.user.js
+// @downloadURL  https://raw.githubusercontent.com/ugomez809/TamperMonkey-Automatic-Quote-New/main/AgencyZoom/az-ticket-finisher-tagger/az-ticket-finisher-tagger-updater.user.js
 // ==/UserScript==
 (function () {
   'use strict';
 
   var LOADER_VERSION = '0.1.1';
-  var TARGET_ID = "apex-continue-new-quote";
-  var TARGET_LABEL = "APEX Home Quote Continue";
-  var TARGET_FILE = "apex-continue-new-quote.user.js";
-  var BASE_URL = "https://raw.githubusercontent.com/ugomez809/TamperMonkey-Automatic-Quote-New/main/Apex-LEX/apex-continue-new-quote";
-  var RUN_IN_PAGE_CONTEXT = true;
+  var TARGET_ID = "az-ticket-finisher-tagger";
+  var TARGET_LABEL = "AgencyZoom Ticket Finisher + Tagger";
+  var TARGET_FILE = "az-ticket-finisher-tagger.user.js";
+  var BASE_URL = "https://raw.githubusercontent.com/ugomez809/TamperMonkey-Automatic-Quote-New/main/AgencyZoom/az-ticket-finisher-tagger";
+  var RUN_IN_PAGE_CONTEXT = false;
   var CHECK_INTERVAL_MS = 30 * 1000;
   var RELOAD_DELAY_MS = 1200;
   var CACHE_KEY = 'tmQuotePerScriptUpdater:' + TARGET_ID + ':code';

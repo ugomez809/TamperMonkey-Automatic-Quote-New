@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         Alta Quoting Updater Installer Updater
 // @namespace    homebot.alta-updater-installer.updater
-// @version      0.1.0
+// @version      0.1.1
 // @description  Loads and auto-updates the Alta Quoting Updater Installer from GitHub.
 // @author       OpenAI
 // @match        https://github.com/ugomez809/TamperMonkey-Automatic-Quote-New*
-// @match        https://raw.githubusercontent.com/ugomez809/TamperMonkey-Automatic-Quote-New/main/Alta/alta-updater-installer/alta-updater-installer-updater.user.js*
+// @match        https://raw.githubusercontent.com/ugomez809/TamperMonkey-Automatic-Quote-New/main/Alta/alta-updater-installer/alta-updater-installer.user.js*
 // @run-at       document-idle
 // @noframes
 // @grant        GM_xmlhttpRequest
@@ -25,7 +25,7 @@
 
 (function () {
   'use strict';
-  const LOADER_VERSION = '0.1.0';
+  const LOADER_VERSION = '0.1.1';
   const TARGET_ID = 'alta-updater-installer';
   const TARGET_LABEL = 'Alta Quoting Updater Installer';
   const TARGET_FILE = 'alta-updater-installer.user.js';

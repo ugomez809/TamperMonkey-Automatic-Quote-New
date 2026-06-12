@@ -1,30 +1,33 @@
 // ==UserScript==
-// @name         APEX Home Quote Continue Updater
-// @namespace    homebot.apex-continue-new-quote.updater
+// @name         Cross-Origin Global Clear Launcher Updater
+// @namespace    homebot.global-clear-launcher.updater
 // @version      0.1.1
-// @description  Loads and auto-updates the APEX Home Quote Continue script from GitHub.
+// @description  Loads and auto-updates the Cross-Origin Global Clear Launcher script from GitHub.
 // @author       OpenAI
+// @match        https://app.agencyzoom.com/*
 // @match        https://farmersagent.lightning.force.com/*
+// @match        https://alta.farmers.com/*
 // @run-at       document-idle
+// @noframes     
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_deleteValue
 // @grant        GM_registerMenuCommand
-// @grant        unsafeWindow
+// @grant        GM_listValues
 // @connect      raw.githubusercontent.com
-// @updateURL    https://raw.githubusercontent.com/ugomez809/TamperMonkey-Automatic-Quote-New/main/Apex-LEX/apex-continue-new-quote/apex-continue-new-quote-updater.user.js
-// @downloadURL  https://raw.githubusercontent.com/ugomez809/TamperMonkey-Automatic-Quote-New/main/Apex-LEX/apex-continue-new-quote/apex-continue-new-quote-updater.user.js
+// @updateURL    https://raw.githubusercontent.com/ugomez809/TamperMonkey-Automatic-Quote-New/main/AgencyZoom/global-clear-launcher/global-clear-launcher-updater.user.js
+// @downloadURL  https://raw.githubusercontent.com/ugomez809/TamperMonkey-Automatic-Quote-New/main/AgencyZoom/global-clear-launcher/global-clear-launcher-updater.user.js
 // ==/UserScript==
 (function () {
   'use strict';
 
   var LOADER_VERSION = '0.1.1';
-  var TARGET_ID = "apex-continue-new-quote";
-  var TARGET_LABEL = "APEX Home Quote Continue";
-  var TARGET_FILE = "apex-continue-new-quote.user.js";
-  var BASE_URL = "https://raw.githubusercontent.com/ugomez809/TamperMonkey-Automatic-Quote-New/main/Apex-LEX/apex-continue-new-quote";
-  var RUN_IN_PAGE_CONTEXT = true;
+  var TARGET_ID = "global-clear-launcher";
+  var TARGET_LABEL = "Cross-Origin Global Clear Launcher";
+  var TARGET_FILE = "global-clear-launcher.user.js";
+  var BASE_URL = "https://raw.githubusercontent.com/ugomez809/TamperMonkey-Automatic-Quote-New/main/AgencyZoom/global-clear-launcher";
+  var RUN_IN_PAGE_CONTEXT = false;
   var CHECK_INTERVAL_MS = 30 * 1000;
   var RELOAD_DELAY_MS = 1200;
   var CACHE_KEY = 'tmQuotePerScriptUpdater:' + TARGET_ID + ':code';

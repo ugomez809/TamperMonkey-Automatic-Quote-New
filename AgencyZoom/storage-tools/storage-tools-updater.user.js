@@ -1,30 +1,33 @@
 // ==UserScript==
-// @name         APEX Home Quote Continue Updater
-// @namespace    homebot.apex-continue-new-quote.updater
+// @name         Cross-Origin Storage Tools Updater
+// @namespace    homebot.storage-tools.updater
 // @version      0.1.1
-// @description  Loads and auto-updates the APEX Home Quote Continue script from GitHub.
+// @description  Loads and auto-updates the Cross-Origin Storage Tools script from GitHub.
 // @author       OpenAI
+// @match        https://app.agencyzoom.com/*
 // @match        https://farmersagent.lightning.force.com/*
+// @match        https://alta.farmers.com/*
 // @run-at       document-idle
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_deleteValue
 // @grant        GM_registerMenuCommand
-// @grant        unsafeWindow
+// @grant        GM_listValues
+// @grant        GM_addValueChangeListener
 // @connect      raw.githubusercontent.com
-// @updateURL    https://raw.githubusercontent.com/ugomez809/TamperMonkey-Automatic-Quote-New/main/Apex-LEX/apex-continue-new-quote/apex-continue-new-quote-updater.user.js
-// @downloadURL  https://raw.githubusercontent.com/ugomez809/TamperMonkey-Automatic-Quote-New/main/Apex-LEX/apex-continue-new-quote/apex-continue-new-quote-updater.user.js
+// @updateURL    https://raw.githubusercontent.com/ugomez809/TamperMonkey-Automatic-Quote-New/main/AgencyZoom/storage-tools/storage-tools-updater.user.js
+// @downloadURL  https://raw.githubusercontent.com/ugomez809/TamperMonkey-Automatic-Quote-New/main/AgencyZoom/storage-tools/storage-tools-updater.user.js
 // ==/UserScript==
 (function () {
   'use strict';
 
   var LOADER_VERSION = '0.1.1';
-  var TARGET_ID = "apex-continue-new-quote";
-  var TARGET_LABEL = "APEX Home Quote Continue";
-  var TARGET_FILE = "apex-continue-new-quote.user.js";
-  var BASE_URL = "https://raw.githubusercontent.com/ugomez809/TamperMonkey-Automatic-Quote-New/main/Apex-LEX/apex-continue-new-quote";
-  var RUN_IN_PAGE_CONTEXT = true;
+  var TARGET_ID = "storage-tools";
+  var TARGET_LABEL = "Cross-Origin Storage Tools";
+  var TARGET_FILE = "storage-tools.user.js";
+  var BASE_URL = "https://raw.githubusercontent.com/ugomez809/TamperMonkey-Automatic-Quote-New/main/AgencyZoom/storage-tools";
+  var RUN_IN_PAGE_CONTEXT = false;
   var CHECK_INTERVAL_MS = 30 * 1000;
   var RELOAD_DELAY_MS = 1200;
   var CACHE_KEY = 'tmQuotePerScriptUpdater:' + TARGET_ID + ':code';

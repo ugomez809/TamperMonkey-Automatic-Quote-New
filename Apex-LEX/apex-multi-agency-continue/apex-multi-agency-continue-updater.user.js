@@ -1,11 +1,13 @@
 // ==UserScript==
-// @name         APEX Home Quote Continue Updater
-// @namespace    homebot.apex-continue-new-quote.updater
+// @name         APEX Multi-Agency Continue Updater
+// @namespace    homebot.apex-multi-agency-continue.updater
 // @version      0.1.1
-// @description  Loads and auto-updates the APEX Home Quote Continue script from GitHub.
+// @description  Loads and auto-updates the APEX Multi-Agency Continue script from GitHub.
 // @author       OpenAI
+// @match        https://farmersagent.my.salesforce.com/*
 // @match        https://farmersagent.lightning.force.com/*
 // @run-at       document-idle
+// @noframes     
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -13,17 +15,17 @@
 // @grant        GM_registerMenuCommand
 // @grant        unsafeWindow
 // @connect      raw.githubusercontent.com
-// @updateURL    https://raw.githubusercontent.com/ugomez809/TamperMonkey-Automatic-Quote-New/main/Apex-LEX/apex-continue-new-quote/apex-continue-new-quote-updater.user.js
-// @downloadURL  https://raw.githubusercontent.com/ugomez809/TamperMonkey-Automatic-Quote-New/main/Apex-LEX/apex-continue-new-quote/apex-continue-new-quote-updater.user.js
+// @updateURL    https://raw.githubusercontent.com/ugomez809/TamperMonkey-Automatic-Quote-New/main/Apex-LEX/apex-multi-agency-continue/apex-multi-agency-continue-updater.user.js
+// @downloadURL  https://raw.githubusercontent.com/ugomez809/TamperMonkey-Automatic-Quote-New/main/Apex-LEX/apex-multi-agency-continue/apex-multi-agency-continue-updater.user.js
 // ==/UserScript==
 (function () {
   'use strict';
 
   var LOADER_VERSION = '0.1.1';
-  var TARGET_ID = "apex-continue-new-quote";
-  var TARGET_LABEL = "APEX Home Quote Continue";
-  var TARGET_FILE = "apex-continue-new-quote.user.js";
-  var BASE_URL = "https://raw.githubusercontent.com/ugomez809/TamperMonkey-Automatic-Quote-New/main/Apex-LEX/apex-continue-new-quote";
+  var TARGET_ID = "apex-multi-agency-continue";
+  var TARGET_LABEL = "APEX Multi-Agency Continue";
+  var TARGET_FILE = "apex-multi-agency-continue.user.js";
+  var BASE_URL = "https://raw.githubusercontent.com/ugomez809/TamperMonkey-Automatic-Quote-New/main/Apex-LEX/apex-multi-agency-continue";
   var RUN_IN_PAGE_CONTEXT = true;
   var CHECK_INTERVAL_MS = 30 * 1000;
   var RELOAD_DELAY_MS = 1200;

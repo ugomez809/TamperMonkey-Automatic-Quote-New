@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Alta Quoting Updater Installer
 // @namespace    homebot.alta-updater-installer
-// @version      0.1.2
-// @description  Opens the updater-only install links for the Alta quoting project.
+// @version      0.2.0
+// @description  Opens the updater-only install links for the AgencyZoom, APEX, and Alta quoting workflow.
 // @author       OpenAI
 // @match        https://github.com/ugomez809/TamperMonkey-Automatic-Quote-New*
 // @match        https://raw.githubusercontent.com/ugomez809/TamperMonkey-Automatic-Quote-New/main/Alta/alta-updater-installer/alta-updater-installer.user.js*
@@ -19,12 +19,21 @@
   'use strict';
 
   const UPDATERS = [
+    ['AgencyZoom Pipeline Keeper Updater', 'AgencyZoom/az-pipeline-keeper/az-pipeline-keeper-updater.user.js'],
+    ['AgencyZoom Quote Launcher + Payload Grabber Updater', 'AgencyZoom/az-stage-runner/az-stage-runner-updater.user.js'],
+    ['AgencyZoom Ticket Finisher + Tagger Updater', 'AgencyZoom/az-ticket-finisher-tagger/az-ticket-finisher-tagger-updater.user.js'],
+    ['AgencyZoom Zillow Ticket Enricher Updater', 'AgencyZoom/az-zillow-ticket-enricher/az-zillow-ticket-enricher-updater.user.js'],
+    ['Cross-Origin Global Clear Launcher Updater', 'AgencyZoom/global-clear-launcher/global-clear-launcher-updater.user.js'],
+    ['Cross-Origin Storage Tools Updater', 'AgencyZoom/storage-tools/storage-tools-updater.user.js'],
     ['APEX Home Quote Continue Updater', 'Apex-LEX/apex-continue-new-quote/apex-continue-new-quote-updater.user.js'],
+    ['APEX Duplicate Check Continue Updater', 'Apex-LEX/apex-duplicates-continue/apex-duplicates-continue-updater.user.js'],
+    ['APEX Multi-Agency Continue Updater', 'Apex-LEX/apex-multi-agency-continue/apex-multi-agency-continue-updater.user.js'],
     ['Alta Payload Bridge Updater', 'Alta/alta-payload-bridge/alta-payload-bridge-updater.user.js'],
     ['Alta Customer Info Updater', 'Alta/alta-customer-info/alta-customer-info-updater.user.js'],
     ['Alta Home Features Updater', 'Alta/alta-home-features/alta-home-features-updater.user.js'],
     ['Alta Replacement Cost Updater', 'Alta/alta-replacement-cost/alta-replacement-cost-updater.user.js'],
-    ['Alta Home Coverage Updater', 'Alta/alta-home-coverage/alta-home-coverage-updater.user.js']
+    ['Alta Home Coverage Updater', 'Alta/alta-home-coverage/alta-home-coverage-updater.user.js'],
+    ['Alta Quoting Updater Installer Updater', 'Alta/alta-updater-installer/alta-updater-installer-updater.user.js']
   ];
 
   const RAW_BASE = 'https://raw.githubusercontent.com/ugomez809/TamperMonkey-Automatic-Quote-New/main';
@@ -61,7 +70,7 @@
     ].join(';');
 
     root.innerHTML = [
-      '<div style="font-weight:700;font-size:15px;margin-bottom:6px;">Quote updater installer</div>',
+      '<div style="font-weight:700;font-size:15px;margin-bottom:6px;">AgencyZoom + APEX + Alta updater installer</div>',
       `<div style="margin-bottom:10px;">Opens ${UPDATERS.length} updater-only Tampermonkey install tabs.</div>`,
       '<div style="display:flex;gap:8px;align-items:center;">',
       '<button type="button" data-action="open" style="flex:1;border:0;border-radius:6px;background:#1868db;color:#fff;font-weight:700;padding:8px 10px;cursor:pointer;">Open updaters</button>',

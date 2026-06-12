@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         APEX Home Quote Continue
 // @namespace    homebot.apex-continue-new-quote
-// @version      1.9.9
-// @description  Detect Personal Lines Quote modal, click the real Home control that owns custom107, wait for any APEX address repair work, respect Risk Address when the repair script uses it, then continue the Home quote flow and recover when one PC blocks the GWPC popup handoff. Does not auto-check the Alta ineligible checkbox.
+// @version      1.10.0
+// @description  Detect Personal Lines Quote modal, click the real Home control that owns custom107, wait for any APEX address repair work, respect Risk Address when the repair script uses it, then continue the Home-to-Alta quote flow. Does not auto-check the Alta ineligible checkbox or force the old carrier route.
 // @author       OpenAI
 // @match        https://farmersagent.lightning.force.com/*
 // @run-at       document-idle
@@ -18,10 +18,10 @@
   if (isAnchorTab()) return;
 
   const SCRIPT_NAME = 'APEX Home Quote Continue';
-  const VERSION = '1.9.9';
+  const VERSION = '1.10.0';
   const SHARED_TAB_OPEN_REQUEST_KEY = 'tm_shared_tab_open_request_v1';
 
-  // Log-export integration — matches storage-tools.user.js discovery rules.
+  // Log-export integration - matches storage-tools.user.js discovery rules.
   // NOTE: @grant stays `none` so this script runs in the page's JS context.
   // Running it in Tampermonkey's isolated world broke modal detection/clicks
   // because `view: window` in MouseEvent init pointed at the wrong window.
@@ -47,8 +47,6 @@
 
     afterHomeClickMs: 2000,
     afterResidenceRadioInternalMs: 250,
-    afterPolicyCenterRadioInternalMs: 250,
-    policyCenterRadioRevealTimeoutMs: 5000,
     afterResidenceBeforeContinueMs: 6000,
     afterContinueClickMs: 1200,
     afterContinueBeforeCloseMs: 5000,
@@ -59,7 +57,6 @@
     continueClickAttempts: 3,
 
     residenceRadioAttempts: 3,
-    policyCenterRadioAttempts: 3,
     maxLogLines: 16,
     panelRight: 12,
     panelBottom: 12,
@@ -134,11 +131,10 @@
     }
   }
 
-  function isLikelyGwpcUrl(url) {
+  function isLikelyAltaUrl(url) {
     const value = String(url || '');
-    return /policycenter(?:-\d+)?\.farmersinsurance\.com/i.test(value) ||
-      /\/pc\/PolicyCenter\.do/i.test(value) ||
-      /\bPolicyCenter\b/i.test(value);
+    return /alta\.farmers\.com/i.test(value) ||
+      /\/quote\/(?:auto|home)\//i.test(value);
   }
 
   function readSharedOpenRequest() {
@@ -162,12 +158,12 @@
     return `req_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
   }
 
-  function requestSupervisorGwpcOpen(blockedGwpc) {
+  function requestSupervisorAltaOpen(blockedAlta) {
     const request = {
       requestId: buildSharedOpenRequestId(),
       requesterTabId: state.requesterTabId,
-      target: 'gwpc',
-      url: resolveOpenUrl(blockedGwpc?.url || ''),
+      target: 'Alta',
+      url: resolveOpenUrl(blockedAlta?.url || ''),
       reason: 'blocked-popup',
       status: 'requested',
       requestedAt: new Date().toISOString(),
@@ -260,14 +256,14 @@
           threw = err;
           throw err;
         } finally {
-          if (!opened && !threw && isLikelyGwpcUrl(resolvedUrl)) {
+          if (!opened && !threw && isLikelyAltaUrl(resolvedUrl)) {
             const recent = findRecentSupervisorOpenRequest(resolvedUrl);
             supervisorRequest = recent?.supervisorRequestId
               ? { requestId: recent.supervisorRequestId }
-              : requestSupervisorGwpcOpen({ url: resolvedUrl });
+              : requestSupervisorAltaOpen({ url: resolvedUrl });
 
             if (supervisorRequest?.requestId) {
-              log(`GWPC popup blocked during window.open; supervisor request ${supervisorRequest.requestId}: ${resolvedUrl}`);
+              log(`Alta popup blocked during window.open; supervisor request ${supervisorRequest.requestId}: ${resolvedUrl}`);
             }
           }
 
@@ -288,7 +284,7 @@
           }
         }
 
-        if (!opened && !threw && isLikelyGwpcUrl(resolvedUrl)) {
+        if (!opened && !threw && isLikelyAltaUrl(resolvedUrl)) {
           return buildWindowOpenStub(resolvedUrl);
         }
 
@@ -301,12 +297,12 @@
     }
   }
 
-  function getRecentBlockedGwpcOpen(sinceAt) {
+  function getRecentBlockedAltaOpen(sinceAt) {
     for (let i = state.windowOpenCalls.length - 1; i >= 0; i--) {
       const call = state.windowOpenCalls[i];
       if (!call || call.at < sinceAt) continue;
       if (!call.blocked) continue;
-      if (!isLikelyGwpcUrl(call.url)) continue;
+      if (!isLikelyAltaUrl(call.url)) continue;
       return call;
     }
 
@@ -1056,185 +1052,6 @@
     return out;
   }
 
-  function getPolicyCenterHomeRadio() {
-    const modal = getQuoteModal();
-    const candidates = deepQueryAllUnique([
-      'input[type="radio"][data-name="pcHomeRadio"][name="footerHomeRadio"][value="pcRadio"]',
-      'input[type="radio"][data-name="pcHomeRadio"]',
-      'input[type="radio"][name="footerHomeRadio"][value="pcRadio"]',
-      'input[type="radio"][title="Policy Center"][value="pcRadio"]',
-      'input[type="radio"][data-name="pcRadio"][value="pcRadio"]'
-    ].join(','), [modal, document]);
-
-    const matches = [];
-    for (const el of candidates) {
-      if (!isAvailableInput(el)) continue;
-
-      const dataName = norm(el.getAttribute('data-name'));
-      const name = norm(el.getAttribute('name'));
-      const value = norm(el.getAttribute('value'));
-      const title = norm(el.getAttribute('title'));
-
-      const isTarget =
-        dataName === 'pcHomeRadio' ||
-        (name === 'footerHomeRadio' && value === 'pcRadio') ||
-        (title === 'Policy Center' && value === 'pcRadio') ||
-        (dataName === 'pcRadio' && value === 'pcRadio');
-
-      if (!isTarget) continue;
-
-      const score =
-        (dataName === 'pcHomeRadio' ? 1000 : 0) +
-        (name === 'footerHomeRadio' ? 500 : 0) +
-        (title === 'Policy Center' ? 200 : 0);
-
-      matches.push({ el, score });
-    }
-
-    matches.sort((a, b) => b.score - a.score);
-    return matches[0]?.el || null;
-  }
-
-  async function waitForPolicyCenterHomeRadio() {
-    const startedAt = now();
-
-    while (now() - startedAt < CFG.policyCenterRadioRevealTimeoutMs) {
-      const radio = getPolicyCenterHomeRadio();
-      if (radio) return radio;
-
-      logWait('Waiting for visible PolicyCenter home radio...', 1500);
-      await sleep(CFG.waitIntervalMs);
-    }
-
-    return getPolicyCenterHomeRadio();
-  }
-
-  function getPolicyCenterHomeRadioLabel(radio) {
-    const scope = getQuoteModal() || document;
-
-    const direct = findAncestorAcrossRoots(radio, el => el.tagName === 'LABEL');
-    if (direct) return direct;
-
-    const wrappers = [];
-    let cur = radio;
-    while (cur && cur instanceof Element && wrappers.length < 4) {
-      wrappers.push(cur);
-      cur = cur.parentElement;
-    }
-
-    for (const wrapper of wrappers) {
-      const spans = deepQueryAll('span', wrapper);
-      for (const span of spans) {
-        if (/\bPolicyCenter\b/i.test(norm(span.textContent))) return span;
-      }
-    }
-
-    const labels = deepQueryAll('label, span', scope);
-    for (const label of labels) {
-      if (!isVisible(label)) continue;
-      if (label.contains(radio)) return label;
-      if (/\bPolicyCenter\b/i.test(norm(label.textContent))) return label;
-    }
-
-    return null;
-  }
-
-  function forceSelectPolicyCenterHomeRadio(radio) {
-    if (!radio) return false;
-
-    const doc = radio.ownerDocument || document;
-    const view = doc.defaultView || window;
-
-    if (isVisible(radio)) {
-      try {
-        radio.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
-      } catch {}
-
-      try {
-        radio.focus?.({ preventScroll: true });
-      } catch {
-        try { radio.focus?.(); } catch {}
-      }
-    }
-
-    if (!radio.checked) {
-      setCheckedProperty(radio, true);
-    }
-
-    try {
-      radio.dispatchEvent(new view.Event('input', {
-        bubbles: true,
-        composed: true
-      }));
-    } catch {}
-
-    try {
-      radio.dispatchEvent(new view.Event('change', {
-        bubbles: true,
-        composed: true
-      }));
-    } catch {}
-
-    try {
-      radio.click?.();
-    } catch {}
-
-    try {
-      radio.dispatchEvent(new view.MouseEvent('click', {
-        bubbles: true,
-        cancelable: true,
-        composed: true,
-        view
-      }));
-    } catch {}
-
-    if (radio.checked) return true;
-
-    const label = getPolicyCenterHomeRadioLabel(radio);
-    if (label) {
-      try { label.click?.(); } catch {}
-      try {
-        label.dispatchEvent(new view.MouseEvent('click', {
-          bubbles: true,
-          cancelable: true,
-          composed: true,
-          view
-        }));
-      } catch {}
-    }
-
-    return !!radio.checked;
-  }
-
-  async function ensurePolicyCenterHomeRadioSelected() {
-    const radio = await waitForPolicyCenterHomeRadio();
-    if (!radio) {
-      log('Visible PolicyCenter home radio not present; continuing.');
-      return true;
-    }
-
-    if (radio.checked) {
-      log('PolicyCenter home radio already selected.');
-      return true;
-    }
-
-    for (let attempt = 1; attempt <= CFG.policyCenterRadioAttempts; attempt++) {
-      log(`Selecting PolicyCenter home radio (${attempt}/${CFG.policyCenterRadioAttempts})`);
-
-      const ok = forceSelectPolicyCenterHomeRadio(radio);
-      await sleep(CFG.afterPolicyCenterRadioInternalMs);
-
-      const fresh = getPolicyCenterHomeRadio();
-      if (ok || fresh?.checked) {
-        log('PolicyCenter home radio selected.');
-        return true;
-      }
-    }
-
-    log('PolicyCenter home radio could not be selected.');
-    return false;
-  }
-
   function getContinueButton() {
     const scope = getQuoteModal() || document;
 
@@ -1388,13 +1205,13 @@
         return 'APEX URL changed';
       }
 
-      const blockedGwpc = getRecentBlockedGwpcOpen(clickStartedAt || startedAt);
-      if (blockedGwpc && !blockedPopupHandled) {
+      const blockedAlta = getRecentBlockedAltaOpen(clickStartedAt || startedAt);
+      if (blockedAlta && !blockedPopupHandled) {
         blockedPopupHandled = true;
-        const request = blockedGwpc.supervisorRequestId
-          ? { requestId: blockedGwpc.supervisorRequestId }
-          : requestSupervisorGwpcOpen(blockedGwpc);
-        log(`GWPC popup was blocked on this PC; requested supervisor open instead: ${blockedGwpc.url}`);
+        const request = blockedAlta.supervisorRequestId
+          ? { requestId: blockedAlta.supervisorRequestId }
+          : requestSupervisorAltaOpen(blockedAlta);
+        log(`Alta popup was blocked on this PC; requested supervisor open instead: ${blockedAlta.url}`);
 
         const result = await waitForSharedOpenRequestResult(
           request.requestId,
@@ -1402,11 +1219,11 @@
         );
 
         if (result?.requestId === request.requestId && result.status === 'opened') {
-          return 'blocked GWPC popup reopened by session supervisor';
+          return 'blocked Alta popup reopened by session supervisor';
         }
 
         if (result?.requestId === request.requestId && (result.status === 'failed' || result.status === 'expired')) {
-          log(`Supervisor GWPC open ${result.status}: ${result.error || blockedGwpc.url}`);
+          log(`Supervisor Alta open ${result.status}: ${result.error || blockedAlta.url}`);
         }
       }
 
@@ -1823,12 +1640,6 @@
 
       log(`Waiting ${Math.ceil(CFG.afterResidenceBeforeContinueMs / 1000)} seconds before Continue New Quote readiness check...`);
       await sleep(CFG.afterResidenceBeforeContinueMs);
-
-      const policyCenterHomeSelected = await ensurePolicyCenterHomeRadioSelected();
-      if (!policyCenterHomeSelected) {
-        setStatus('Running');
-        return;
-      }
 
       const continueClicked = await clickContinueNewQuote(quoteKey);
 

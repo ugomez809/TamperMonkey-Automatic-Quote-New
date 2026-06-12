@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Alta Customer Info
 // @namespace    homebot.alta-customer-info
-// @version      0.1.2
+// @version      0.1.3
 // @description  Manual Alta customer-info page runner. Sets today's policy start date, confirms default customer questions, acknowledges disclosures, and continues.
 // @author       OpenAI
 // @match        https://alta.farmers.com/quote/auto/personal-info*
@@ -19,7 +19,7 @@
   try { window.__ALTA_CUSTOMER_INFO_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'Alta Customer Info';
-  const VERSION = '0.1.2';
+  const VERSION = '0.1.3';
   const KEYS = {
     currentJob: 'tm_alta_current_job_v1',
     payload: 'tm_alta_home_quote_grab_payload_v1',
@@ -103,7 +103,7 @@
   }
 
   async function setInput(selector, value) {
-    const input = await waitFor(() => document.querySelector(selector));
+    const input = await waitFor(() => findInputTarget(selector));
     try { input.focus(); } catch {}
     setNativeValue(input, value);
     dispatchInputEvents(input);
@@ -327,6 +327,18 @@
     try { el.value = value; } catch (err) {
       throw new Error(`Unable to set ${el?.id || el?.name || el?.tagName || 'input'}: ${err?.message || err}`);
     }
+  }
+
+  function findInputTarget(selector) {
+    const el = document.querySelector(selector);
+    if (!el) return null;
+    if (isValueControl(el)) return el;
+    return el.querySelector('input:not([hidden]):not([readonly]), textarea, select') || el.querySelector('input, textarea, select');
+  }
+
+  function isValueControl(el) {
+    const tag = String(el?.tagName || '').toUpperCase();
+    return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
   }
 
   function dispatchInputEvents(el) {

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Alta Customer Info
 // @namespace    homebot.alta-customer-info
-// @version      0.1.1
+// @version      0.1.2
 // @description  Manual Alta customer-info page runner. Sets today's policy start date, confirms default customer questions, acknowledges disclosures, and continues.
 // @author       OpenAI
 // @match        https://alta.farmers.com/quote/auto/personal-info*
@@ -19,7 +19,7 @@
   try { window.__ALTA_CUSTOMER_INFO_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'Alta Customer Info';
-  const VERSION = '0.1.1';
+  const VERSION = '0.1.2';
   const KEYS = {
     currentJob: 'tm_alta_current_job_v1',
     payload: 'tm_alta_home_quote_grab_payload_v1',
@@ -48,23 +48,32 @@
   }
 
   async function runPage({ continueAfter = true } = {}) {
+    let step = 'starting';
     try {
       setStatus('Running customer info');
+      step = 'waiting for Customer information page';
       await waitFor(() => findByText('h1', 'Customer information'));
 
+      step = 'reading Alta job';
       const job = readJob();
       if (job['AZ ID']) log(`Job loaded: ${job['AZ ID']} ${job.Name || ''}`);
       else log('No Alta job found; using page/default values');
 
+      step = 'setting policy start date';
       const policyDate = formatDate(new Date());
       await setInput('#policyStartDate', policyDate);
       log(`Policy start date set to ${policyDate}`);
 
+      step = 'setting marital status';
       await clickRadio('Marital status', 'S', false);
+      step = 'setting primary residence';
       await clickRadio('Is the home their current or soon-to-be primary residence?', 'yes', false);
+      step = 'setting business owner';
       await clickRadio('Is the customer a business owner?', 'no', false);
+      step = 'setting specialty units';
       await clickRadio('Does the customer own any specialty units?', 'no', false);
 
+      step = 'updating payload';
       updatePayload({
         Name: job.Name || fullName(job),
         'Mailing Address': job['Mailing Address'] || mailingAddress(job),
@@ -73,6 +82,7 @@
       }, { customerInfoComplete: true });
 
       if (continueAfter) {
+        step = 'clicking Continue';
         await clickContinue();
         log('Clicked Continue');
       } else {
@@ -81,23 +91,23 @@
       setStatus('Done');
     } catch (err) {
       setStatus('Error');
-      log(`Error: ${err?.message || err}`);
+      log(`Error during ${step}: ${err?.message || err}`);
+      if (err?.stack) console.error(`[${SCRIPT_NAME}] Error during ${step}`, err);
     }
   }
 
   async function clickContinue() {
     const btn = await waitFor(() => document.querySelector('button[data-test-id="CONTINUE_BUTTON"]') || buttonByText('Continue'));
-    btn.click();
+    clickElement(btn);
     await sleep(500);
   }
 
   async function setInput(selector, value) {
     const input = await waitFor(() => document.querySelector(selector));
-    input.focus();
+    try { input.focus(); } catch {}
     setNativeValue(input, value);
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-    input.dispatchEvent(new Event('change', { bubbles: true }));
-    input.blur();
+    dispatchInputEvents(input);
+    try { input.blur(); } catch {}
     await sleep(150);
   }
 
@@ -114,7 +124,7 @@
       log(`Skipped missing radio value ${value}: ${groupLabel}`);
       return false;
     }
-    if (!input.checked) (input.closest('mat-radio-button') || input).click();
+    if (!input.checked) clickElement(input.closest('mat-radio-button') || input);
     await sleep(150);
     log(`Radio set: ${groupLabel} = ${value}`);
     return true;
@@ -299,10 +309,43 @@
   }
 
   function setNativeValue(el, value) {
-    const proto = Object.getPrototypeOf(el);
-    const desc = Object.getOwnPropertyDescriptor(proto, 'value') || Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
-    if (desc?.set) desc.set.call(el, value);
-    else el.value = value;
+    const win = el?.ownerDocument?.defaultView || window;
+    const setters = [
+      Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value')?.set,
+      Object.getOwnPropertyDescriptor(win.HTMLInputElement?.prototype || {}, 'value')?.set,
+      Object.getOwnPropertyDescriptor(win.HTMLTextAreaElement?.prototype || {}, 'value')?.set,
+      Object.getOwnPropertyDescriptor(win.HTMLSelectElement?.prototype || {}, 'value')?.set
+    ].filter(Boolean);
+
+    for (const setter of setters) {
+      try {
+        setter.call(el, value);
+        if (String(el.value ?? '') === String(value)) return;
+      } catch {}
+    }
+
+    try { el.value = value; } catch (err) {
+      throw new Error(`Unable to set ${el?.id || el?.name || el?.tagName || 'input'}: ${err?.message || err}`);
+    }
+  }
+
+  function dispatchInputEvents(el) {
+    const win = el?.ownerDocument?.defaultView || window;
+    const EventCtor = win.Event || Event;
+    el.dispatchEvent(new EventCtor('input', { bubbles: true, composed: true }));
+    el.dispatchEvent(new EventCtor('change', { bubbles: true, composed: true }));
+  }
+
+  function clickElement(el) {
+    if (!el) return false;
+    try {
+      el.click();
+      return true;
+    } catch {}
+
+    const win = el.ownerDocument?.defaultView || window;
+    const MouseEventCtor = win.MouseEvent || MouseEvent;
+    return el.dispatchEvent(new MouseEventCtor('click', { bubbles: true, cancelable: true, composed: true }));
   }
 
   function buttonByText(text) {

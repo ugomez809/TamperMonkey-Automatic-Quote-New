@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Alta Home Coverage
 // @namespace    homebot.alta-home-coverage
-// @version      0.1.6
+// @version      0.1.7
 // @description  Manual Alta home-coverage page runner. Sets All Perils to 5000, Split Water to 5 percent, captures pricing, and publishes the Alta home payload.
 // @author       OpenAI
 // @match        https://alta.farmers.com/quote/*
@@ -19,14 +19,14 @@
   try { window.__ALTA_HOME_COVERAGE_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'Alta Home Coverage';
-  const VERSION = '0.1.6';
+  const VERSION = '0.1.7';
   const KEYS = {
     currentJob: 'tm_alta_current_job_v1',
     payload: 'tm_alta_home_quote_grab_payload_v1',
     panelPos: 'tm_alta_home_coverage_panel_pos_v1',
     logs: 'tm_alta_home_coverage_logs_v1'
   };
-  const CFG = { maxLogLines: 36, waitMs: 12000, pollMs: 200, priceWaitMs: 60000 };
+  const CFG = { maxLogLines: 40, waitMs: 12000, pollMs: 200, recalcWaitMs: 8000, priceWaitMs: 60000 };
   const state = { panel: null, ui: {}, logs: [] };
 
   init();
@@ -53,18 +53,23 @@
       const pricing = await captureAllPricing();
       const coverageData = captureCoverageData();
       const capturedCount = Object.values(pricing.rowUpdates).filter(Boolean).length;
-      const result = capturedCount
+      const complete = capturedCount === 4;
+      const submissionNumber = captureSubmissionNumber();
+      const result = complete
+        ? 'Grabbed 4/4 Alta prices'
+        : capturedCount
         ? `Grabbed ${capturedCount}/4 Alta price${capturedCount === 1 ? '' : 's'}`
         : 'Alta pricing unavailable: no valid prices captured';
       const rowUpdates = {
         ...pricing.rowUpdates,
         'Auto Discount': pricing.autoDiscountSeen ? 'Yes' : 'No',
         'Date Processed?': formatDate(new Date()),
-        'Done?': capturedCount ? 'Yes' : 'No',
+        'Done?': complete ? 'Yes' : 'No',
         Result: result,
         'Water Device?': ''
       };
-      const payload = updatePayload(rowUpdates, { homeCoverageComplete: !!capturedCount, finalRefreshComplete: !!capturedCount }, publish && !!capturedCount, {
+      if (submissionNumber) rowUpdates['Submission Number'] = submissionNumber;
+      const payload = updatePayload(rowUpdates, { homeCoverageComplete: complete, finalRefreshComplete: complete }, publish && complete, {
         altaCoverage: {
           price: pricing.lastPrice || {},
           coverageData,
@@ -147,6 +152,7 @@
     const runs = [];
     let lastPrice = null;
     let lastAmount = '';
+    const amountsByTemplate = {};
     let autoDiscountSeen = false;
 
     for (const scenario of scenarios) {
@@ -169,10 +175,15 @@
         lastPrice = price;
 
         if (!price.valid || !amount) throw new Error(price.reason || 'price not found');
+        const templateKey = scenario.template.toLowerCase();
+        if (scenario.autoDiscount && amountsByTemplate[templateKey] === amount) {
+          throw new Error('auto discount premium did not change after recalculation');
+        }
         rowUpdates[scenario.field] = amount;
         run.ok = true;
         run.amount = amount;
         lastAmount = amount;
+        if (!scenario.autoDiscount) amountsByTemplate[templateKey] = amount;
         autoDiscountSeen = autoDiscountSeen || scenario.autoDiscount;
         log(`${scenario.field}: ${amount}`);
       } catch (err) {
@@ -194,13 +205,17 @@
   async function recalculateAndCapturePrice(previousAmount = '') {
     const before = capturePrice();
     const beforeAmount = previousAmount || before.totalWithFees || before.termPremium || '';
-    const cta = document.querySelector('button[data-test-id="TUI_REVIEW_COVERAGE_CARD_CTA"]');
-    if (cta && !isDisabled(cta) && /recalculate|go|quote|update/i.test(normalize(cta.textContent))) {
+    const cta = await waitFor(() => findRecalculateButton(), CFG.recalcWaitMs).catch(() => null);
+    if (cta) {
       clickElement(cta);
-      log(`Clicked quote CTA: ${normalize(cta.textContent) || 'button'}`);
+      log(`Clicked recalculation CTA: ${normalize(cta.textContent) || 'button'}`);
       await sleep(1500);
     } else {
-      log('Quote CTA not available; reading current price');
+      const quoteCta = document.querySelector('button[data-test-id="TUI_REVIEW_COVERAGE_CARD_CTA"]');
+      const label = normalize(quoteCta?.textContent);
+      log(label && /^go$/i.test(label)
+        ? 'Recalculate button not available; leaving Go alone'
+        : 'Recalculate button not available; reading current price');
     }
 
     const freshPrice = await waitFor(() => {
@@ -214,12 +229,26 @@
 
     const current = capturePrice();
     const currentAmount = current.totalWithFees || current.termPremium || '';
+    if (beforeAmount && currentAmount === beforeAmount) {
+      return {
+        ...current,
+        valid: false,
+        reason: `premium stayed ${currentAmount || 'unchanged'} after ${Math.round(CFG.priceWaitMs / 1000)}s`
+      };
+    }
     if (current.valid && currentAmount) {
-      log(beforeAmount && currentAmount === beforeAmount
-        ? `Premium still ${currentAmount} after ${Math.round(CFG.priceWaitMs / 1000)}s; using current price`
-        : 'Premium wait timed out; using current price');
+      log('Premium wait timed out; using current price');
     }
     return current;
+  }
+
+  function findRecalculateButton() {
+    const buttons = [
+      document.querySelector('button[data-test-id="TUI_REVIEW_COVERAGE_CARD_CTA"]'),
+      document.querySelector('button[data-test-id="ReCalculate_Button"]'),
+      ...document.querySelectorAll('button')
+    ].filter(Boolean);
+    return buttons.find((button) => isVisible(button) && !isDisabled(button) && /^recalculate$/i.test(normalize(button.textContent)));
   }
 
   async function setHomeAutoDiscount(enabled, required = true) {
@@ -262,7 +291,7 @@
   }
 
   function findClickableToggle(control) {
-    return control.querySelector('input[type="checkbox"], input[type="radio"], button, [role="checkbox"], [role="switch"]') || control;
+    return control.querySelector('label, .mat-mdc-checkbox-touch-target, [role="checkbox"], [role="switch"], button, input[type="checkbox"], input[type="radio"]') || control;
   }
 
   function getToggleState(control) {
@@ -303,6 +332,7 @@
 
   function captureCoverageData() {
     return {
+      submissionNumber: captureSubmissionNumber(),
       template: normalize(document.querySelector('mat-select[formfieldmodifiedsegmentreporter="coverage_template"]')?.textContent),
       allPerils: currentSelectValue('Policy deductibles-All perils-'),
       splitWater: currentSelectValue('Policy deductibles-Split water-'),
@@ -310,6 +340,20 @@
       policyStartDate: normalize(document.querySelector('[data-test-id="TUI_REVIEW_COVERAGE_POLICY_DATE_VALUE"]')?.textContent),
       autoDiscount: detectAutoDiscount()
     };
+  }
+
+  function captureSubmissionNumber() {
+    const candidates = [
+      ...document.querySelectorAll('.tui-caption-text, [class*="caption"], span, div')
+    ];
+    for (const el of candidates) {
+      const text = normalize(el.textContent);
+      const match = text.match(/\bAlta\s*#\s*([A-Za-z0-9-]+)/i);
+      if (match) return match[1];
+    }
+    const text = normalize(document.body.textContent);
+    const match = text.match(/\bAlta\s*#\s*([A-Za-z0-9-]+)/i);
+    return match ? match[1] : '';
   }
 
   function detectAutoDiscount() {
@@ -540,6 +584,12 @@
 
   function isDisabled(el) {
     return !!el?.disabled || el?.getAttribute?.('aria-disabled') === 'true' || el?.classList?.contains('disabled');
+  }
+
+  function isVisible(el) {
+    if (!el) return false;
+    const style = window.getComputedStyle(el);
+    return style.display !== 'none' && style.visibility !== 'hidden' && el.getClientRects().length > 0;
   }
 
   function findByText(selector, text) {

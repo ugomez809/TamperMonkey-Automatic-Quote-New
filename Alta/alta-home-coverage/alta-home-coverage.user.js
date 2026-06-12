@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Alta Home Coverage
 // @namespace    homebot.alta-home-coverage
-// @version      0.1.3
+// @version      0.1.4
 // @description  Manual Alta home-coverage page runner. Sets All Perils to 5000, Split Water to 5 percent, captures pricing, and publishes the Alta home payload.
 // @author       OpenAI
 // @match        https://alta.farmers.com/quote/*
@@ -19,7 +19,7 @@
   try { window.__ALTA_HOME_COVERAGE_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'Alta Home Coverage';
-  const VERSION = '0.1.3';
+  const VERSION = '0.1.4';
   const KEYS = {
     currentJob: 'tm_alta_current_job_v1',
     payload: 'tm_alta_home_quote_grab_payload_v1',
@@ -177,8 +177,22 @@
   }
 
   function money(text) {
-    const match = normalize(text).match(/\$[\d,]+(?:\.\d{2})?/);
-    return match ? match[0] : '';
+    const candidates = moneyCandidates(text);
+    return candidates[0] || '';
+  }
+
+  function moneyCandidates(text) {
+    const value = normalize(text);
+    const matches = value.match(/\$?\s*\d{1,3}(?:,\d{3})*(?:\.\d{2})|\$?\s*\d+(?:\.\d{2})/g) || [];
+    return matches
+      .map(normalizeMoney)
+      .filter(Boolean);
+  }
+
+  function normalizeMoney(token) {
+    const digits = normalize(token).replace(/\$/g, '').replace(/\s+/g, '');
+    if (!/\d/.test(digits)) return '';
+    return `$${digits}`;
   }
 
   function updatePayload(rowUpdates, progressUpdates, ready, extraMeta) {

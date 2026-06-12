@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Alta Home Coverage
 // @namespace    homebot.alta-home-coverage
-// @version      0.1.5
+// @version      0.1.6
 // @description  Manual Alta home-coverage page runner. Sets All Perils to 5000, Split Water to 5 percent, captures pricing, and publishes the Alta home payload.
 // @author       OpenAI
 // @match        https://alta.farmers.com/quote/*
@@ -19,14 +19,14 @@
   try { window.__ALTA_HOME_COVERAGE_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'Alta Home Coverage';
-  const VERSION = '0.1.5';
+  const VERSION = '0.1.6';
   const KEYS = {
     currentJob: 'tm_alta_current_job_v1',
     payload: 'tm_alta_home_quote_grab_payload_v1',
     panelPos: 'tm_alta_home_coverage_panel_pos_v1',
     logs: 'tm_alta_home_coverage_logs_v1'
   };
-  const CFG = { maxLogLines: 36, waitMs: 12000, pollMs: 200, priceWaitMs: 20000 };
+  const CFG = { maxLogLines: 36, waitMs: 12000, pollMs: 200, priceWaitMs: 60000 };
   const state = { panel: null, ui: {}, logs: [] };
 
   init();
@@ -49,9 +49,6 @@
     try {
       setStatus('Running home coverage');
       await waitFor(() => isHomeCoverageReady());
-
-      await setMatSelectByAria('Policy deductibles-All perils-', '$5,000', false);
-      await setMatSelectByAria('Policy deductibles-Split water-', '(5.0%)', false);
 
       const pricing = await captureAllPricing();
       const coverageData = captureCoverageData();
@@ -142,13 +139,14 @@
   async function captureAllPricing() {
     const scenarios = [
       { field: 'Standard Pricing No Auto Discount', template: 'Standard', autoDiscount: false },
-      { field: 'Enhance Pricing No Auto Discount', template: 'Enhance', autoDiscount: false },
       { field: 'Standard Pricing Auto Discount', template: 'Standard', autoDiscount: true },
-      { field: 'Enhance Pricing Auto Discount', template: 'Enhance', autoDiscount: true }
+      { field: 'Enhance Pricing No Auto Discount', template: 'Enhanced', autoDiscount: false },
+      { field: 'Enhance Pricing Auto Discount', template: 'Enhanced', autoDiscount: true }
     ];
     const rowUpdates = {};
     const runs = [];
     let lastPrice = null;
+    let lastAmount = '';
     let autoDiscountSeen = false;
 
     for (const scenario of scenarios) {
@@ -165,15 +163,17 @@
         log(`Pricing step: ${scenario.field}`);
         await setCoverageTemplate(scenario.template, true);
         await setHomeAutoDiscount(scenario.autoDiscount, true);
-        const price = await recalculateAndCapturePrice();
+        await applyCoverageDefaults();
+        const price = await recalculateAndCapturePrice(lastAmount);
         const amount = price.totalWithFees || price.termPremium || '';
         lastPrice = price;
-        autoDiscountSeen = autoDiscountSeen || scenario.autoDiscount;
 
         if (!price.valid || !amount) throw new Error(price.reason || 'price not found');
         rowUpdates[scenario.field] = amount;
         run.ok = true;
         run.amount = amount;
+        lastAmount = amount;
+        autoDiscountSeen = autoDiscountSeen || scenario.autoDiscount;
         log(`${scenario.field}: ${amount}`);
       } catch (err) {
         run.error = err?.message || String(err);
@@ -186,7 +186,14 @@
     return { rowUpdates, runs, lastPrice, autoDiscountSeen };
   }
 
-  async function recalculateAndCapturePrice() {
+  async function applyCoverageDefaults() {
+    await setMatSelectByAria('Policy deductibles-All perils-', '$5,000', false);
+    await setMatSelectByAria('Policy deductibles-Split water-', '(5.0%)', false);
+  }
+
+  async function recalculateAndCapturePrice(previousAmount = '') {
+    const before = capturePrice();
+    const beforeAmount = previousAmount || before.totalWithFees || before.termPremium || '';
     const cta = document.querySelector('button[data-test-id="TUI_REVIEW_COVERAGE_CARD_CTA"]');
     if (cta && !isDisabled(cta) && /recalculate|go|quote|update/i.test(normalize(cta.textContent))) {
       clickElement(cta);
@@ -196,10 +203,23 @@
       log('Quote CTA not available; reading current price');
     }
 
-    return await waitFor(() => {
+    const freshPrice = await waitFor(() => {
       const price = capturePrice();
-      return price.valid ? price : null;
-    }, CFG.priceWaitMs).catch(() => capturePrice());
+      const amount = price.totalWithFees || price.termPremium || '';
+      if (!price.valid || !amount) return null;
+      if (beforeAmount && amount === beforeAmount) return null;
+      return price;
+    }, CFG.priceWaitMs).catch(() => null);
+    if (freshPrice) return freshPrice;
+
+    const current = capturePrice();
+    const currentAmount = current.totalWithFees || current.termPremium || '';
+    if (current.valid && currentAmount) {
+      log(beforeAmount && currentAmount === beforeAmount
+        ? `Premium still ${currentAmount} after ${Math.round(CFG.priceWaitMs / 1000)}s; using current price`
+        : 'Premium wait timed out; using current price');
+    }
+    return current;
   }
 
   async function setHomeAutoDiscount(enabled, required = true) {

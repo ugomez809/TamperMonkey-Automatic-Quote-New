@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Cross-Origin UI Dock Organizer
 // @namespace    homebot.ui-dock-organizer
-// @version      1.7.7
-// @description  Organizes floating UIs safely inside the viewport. Biggest panel anchors bottom-right, others stack to the left within the anchor height, then continue upward on the right. Includes active-script highlighting for opted-in panels.
+// @version      1.7.8
+// @description  Organizes floating UIs safely inside the viewport. Biggest panel anchors bottom-right, others stack to the left within the anchor height, then continue upward on the right. On Alta, the organizer panel itself stays top-right. Includes active-script highlighting for opted-in panels.
 // @author       OpenAI
 // @match        https://app.agencyzoom.com/*
 // @match        https://app.agencyzoom.com/referral/pipeline*
@@ -23,7 +23,7 @@
   try { window.__HB_UI_DOCK_ORGANIZER_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'Cross-Origin UI Dock Organizer';
-  const VERSION = '1.7.7';
+  const VERSION = '1.7.8';
 
   // Log-export integration - workflow-origin dynamic key.
   const LOG_PERSIST_KEY = (() => {
@@ -228,7 +228,7 @@
 
     log('Organizer loaded');
     log('Viewport clamp enabled');
-    log(isAgencyZoomOrigin() ? 'Organizer anchored by AgencyZoom profile link' : 'Organizer locked bottom-left');
+    log(getOrganizerAnchorLabel());
 
     fullScanAndArrange();
     state.tickTimer = setInterval(tick, CFG.tickMs);
@@ -689,6 +689,16 @@
     return /(^|\.)app\.agencyzoom\.com$/i.test(location.hostname);
   }
 
+  function isAltaOrigin() {
+    return /(^|\.)alta\.farmers\.com$/i.test(location.hostname);
+  }
+
+  function getOrganizerAnchorLabel() {
+    if (isAgencyZoomOrigin()) return 'Organizer anchored by AgencyZoom profile link';
+    if (isAltaOrigin()) return 'Organizer locked top-right';
+    return 'Organizer locked bottom-left';
+  }
+
   function getAgencyZoomProfileAnchor() {
     const candidates = Array.from(document.querySelectorAll('a'));
     for (const el of candidates) {
@@ -727,6 +737,19 @@
         return;
       }
     }
+    if (isAltaOrigin()) {
+      try {
+        panel.style.setProperty('position', 'fixed', 'important');
+        panel.style.setProperty('left', 'auto', 'important');
+        panel.style.setProperty('right', `${CFG.rightGap}px`, 'important');
+        panel.style.setProperty('top', `${CFG.topGap}px`, 'important');
+        panel.style.setProperty('bottom', 'auto', 'important');
+        panel.style.setProperty('transform', 'none', 'important');
+        panel.style.setProperty('margin', '0', 'important');
+      } catch {}
+      return;
+    }
+
     try {
       panel.style.setProperty('position', 'fixed', 'important');
       panel.style.setProperty('left', `${CFG.sideGap}px`, 'important');

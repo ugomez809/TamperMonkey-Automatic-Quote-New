@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         Alta Home Features
 // @namespace    homebot.alta-home-features
-// @version      0.1.1
+// @version      0.1.3
 // @description  Manual Alta home-features page runner. Applies Alta safe defaults, leaves water leak protection untouched, and continues.
 // @author       OpenAI
-// @match        https://alta.farmers.com/quote/home/home-features*
+// @match        https://alta.farmers.com/quote/*
 // @run-at       document-idle
 // @noframes
 // @grant        none
@@ -19,7 +19,7 @@
   try { window.__ALTA_HOME_FEATURES_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'Alta Home Features';
-  const VERSION = '0.1.1';
+  const VERSION = '0.1.3';
   const KEYS = {
     currentJob: 'tm_alta_current_job_v1',
     payload: 'tm_alta_home_quote_grab_payload_v1',
@@ -37,7 +37,6 @@
     restorePanelPos();
     loadLogs();
     log(`Loaded v${VERSION}`);
-    updatePayload({}, { homeFeaturesLoaded: true });
     window.__ALTA_HOME_FEATURES_CLEANUP__ = cleanup;
   }
 
@@ -49,7 +48,7 @@
   async function runPage({ continueAfter = true } = {}) {
     try {
       setStatus('Running home features');
-      await waitFor(() => findByText('.pageTitle,.tui-subtitle,h1,h2', 'Home features'));
+      await waitFor(() => isHomeFeaturesReady());
 
       await setMatSelectByFormControl('firmAlarm', 'No device', false);
       await setMatSelectByFormControl('burglarAlarm', 'No device', false);
@@ -359,6 +358,18 @@
   function findByText(selector, text) {
     const wanted = normalize(text).toLowerCase();
     return [...document.querySelectorAll(selector)].find((el) => normalize(el.textContent).toLowerCase().includes(wanted));
+  }
+
+  function isHomeFeaturesReady() {
+    const pageMarker = findByText('.pageTitle,.tui-subtitle,h1,h2', 'Home features') ||
+      document.querySelector('mat-select[formcontrolname="firmAlarm"], mat-select[formcontrolname="burglarAlarm"], #yearBuilt, [data-test-id="LIVABLE_SQUARE_FEET_INPUT"]');
+    return pageMarker && (!document.querySelector('.sidenav-current-step') || isCurrentSideNavStep('Home features'));
+  }
+
+  function isCurrentSideNavStep(label) {
+    const wanted = normalize(label).toLowerCase();
+    return [...document.querySelectorAll('.sidenav-current-step')]
+      .some((el) => normalize(el.textContent).toLowerCase().includes(wanted));
   }
 
   function waitFor(fn, timeoutMs = CFG.waitMs) {

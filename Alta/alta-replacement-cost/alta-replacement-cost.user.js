@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         Alta Replacement Cost
 // @namespace    homebot.alta-replacement-cost
-// @version      0.1.1
+// @version      0.1.3
 // @description  Manual Alta replacement-cost page runner. Captures replacement cost and 360Value details, stores them in the Alta home payload, and continues.
 // @author       OpenAI
-// @match        https://alta.farmers.com/quote/home/replacement-cost*
+// @match        https://alta.farmers.com/quote/*
 // @run-at       document-idle
 // @noframes
 // @grant        none
@@ -19,7 +19,7 @@
   try { window.__ALTA_REPLACEMENT_COST_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'Alta Replacement Cost';
-  const VERSION = '0.1.1';
+  const VERSION = '0.1.3';
   const KEYS = {
     currentJob: 'tm_alta_current_job_v1',
     payload: 'tm_alta_home_quote_grab_payload_v1',
@@ -37,7 +37,6 @@
     restorePanelPos();
     loadLogs();
     log(`Loaded v${VERSION}`);
-    updatePayload({}, { replacementCostLoaded: true }, {});
     window.__ALTA_REPLACEMENT_COST_CLEANUP__ = cleanup;
   }
 
@@ -49,7 +48,7 @@
   async function runPage({ continueAfter = true } = {}) {
     try {
       setStatus('Capturing replacement cost');
-      await waitFor(() => document.querySelector('[data-test-id="Currency"]') || findByText('h2,div', 'Primary home characteristics'));
+      await waitFor(() => isReplacementCostReady());
 
       const replacementCost = normalize(document.querySelector('[data-test-id="Currency"]')?.textContent);
       const details = capture360Value();
@@ -298,6 +297,17 @@
   function findByText(selector, text) {
     const wanted = normalize(text).toLowerCase();
     return [...document.querySelectorAll(selector)].find((el) => normalize(el.textContent).toLowerCase().includes(wanted));
+  }
+
+  function isReplacementCostReady() {
+    const pageMarker = document.querySelector('[data-test-id="Currency"], [data-test-id^="Property_Name "]') || findByText('h2,div', 'Primary home characteristics');
+    return pageMarker && (!document.querySelector('.sidenav-current-step') || isCurrentSideNavStep('Est replacement cost'));
+  }
+
+  function isCurrentSideNavStep(label) {
+    const wanted = normalize(label).toLowerCase();
+    return [...document.querySelectorAll('.sidenav-current-step')]
+      .some((el) => normalize(el.textContent).toLowerCase().includes(wanted));
   }
 
   function waitFor(fn, timeoutMs = CFG.waitMs) {

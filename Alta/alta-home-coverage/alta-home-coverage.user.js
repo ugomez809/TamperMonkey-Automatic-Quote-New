@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         Alta Home Coverage
 // @namespace    homebot.alta-home-coverage
-// @version      0.1.1
+// @version      0.1.3
 // @description  Manual Alta home-coverage page runner. Sets All Perils to 5000, Split Water to 5 percent, captures pricing, and publishes the Alta home payload.
 // @author       OpenAI
-// @match        https://alta.farmers.com/quote/home/home-coverage*
+// @match        https://alta.farmers.com/quote/*
 // @run-at       document-idle
 // @noframes
 // @grant        none
@@ -19,7 +19,7 @@
   try { window.__ALTA_HOME_COVERAGE_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'Alta Home Coverage';
-  const VERSION = '0.1.1';
+  const VERSION = '0.1.3';
   const KEYS = {
     currentJob: 'tm_alta_current_job_v1',
     payload: 'tm_alta_home_quote_grab_payload_v1',
@@ -37,7 +37,6 @@
     restorePanelPos();
     loadLogs();
     log(`Loaded v${VERSION}`);
-    updatePayload({}, { homeCoverageLoaded: true }, false, {});
     window.__ALTA_HOME_COVERAGE_CLEANUP__ = cleanup;
   }
 
@@ -49,7 +48,7 @@
   async function runPage({ publish = true, clickQuote = true } = {}) {
     try {
       setStatus('Running home coverage');
-      await waitFor(() => findByText('h1', 'Home coverages') || document.querySelector('#quoteCardCoverageCard'));
+      await waitFor(() => isHomeCoverageReady());
 
       await setMatSelectByAria('Policy deductibles-All perils-', '$5,000', false);
       await setMatSelectByAria('Policy deductibles-Split water-', '(5.0%)', false);
@@ -367,6 +366,17 @@
   function findByText(selector, text) {
     const wanted = normalize(text).toLowerCase();
     return [...document.querySelectorAll(selector)].find((el) => normalize(el.textContent).toLowerCase().includes(wanted));
+  }
+
+  function isHomeCoverageReady() {
+    const pageMarker = findByText('h1', 'Home coverages') || document.querySelector('#quoteCardCoverageCard');
+    return pageMarker && (!document.querySelector('.sidenav-current-step') || isCurrentSideNavStep('Home coverages'));
+  }
+
+  function isCurrentSideNavStep(label) {
+    const wanted = normalize(label).toLowerCase();
+    return [...document.querySelectorAll('.sidenav-current-step')]
+      .some((el) => normalize(el.textContent).toLowerCase().includes(wanted));
   }
 
   function waitFor(fn, timeoutMs = CFG.waitMs) {

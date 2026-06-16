@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Alta Customer Info
 // @namespace    homebot.alta-customer-info
-// @version      0.1.7
+// @version      0.1.8
 // @description  Auto-runs the Alta customer-info page. Sets today's policy start date, confirms default customer questions, acknowledges disclosures, and continues.
 // @author       OpenAI
 // @match        https://alta.farmers.com/*
@@ -19,14 +19,14 @@
   try { window.__ALTA_CUSTOMER_INFO_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'Alta Customer Info';
-  const VERSION = '0.1.7';
+  const VERSION = '0.1.8';
   const KEYS = {
     currentJob: 'tm_alta_current_job_v1',
     payload: 'tm_alta_home_quote_grab_payload_v1',
     panelPos: 'tm_alta_customer_info_panel_pos_v1',
     logs: 'tm_alta_customer_info_logs_v1'
   };
-  const CFG = { maxLogLines: 24, waitMs: 12000, pollMs: 200, autoScanMs: 800 };
+  const CFG = { maxLogLines: 24, waitMs: 12000, loadWaitMs: 25000, settleMs: 1600, pollMs: 200, autoScanMs: 800 };
   const state = {
     panel: null,
     ui: {},
@@ -63,7 +63,7 @@
     try {
       setStatus('Running customer info');
       step = 'waiting for Customer information page';
-      await waitFor(() => findByText('h1', 'Customer information'));
+      await waitForPageReady(() => isCustomerInfoReady(), 'Customer information page');
 
       step = 'reading Alta job';
       const job = readJob();
@@ -174,7 +174,7 @@
   }
 
   async function clickContinue() {
-    const btn = await waitFor(() => document.querySelector('button[data-test-id="CONTINUE_BUTTON"]') || buttonByText('Continue'));
+    const btn = await waitFor(() => findContinueButton());
     clickElement(btn);
     await sleep(500);
     const dialog = await waitFor(() => findInformationUpdatedDialog(), 2500).catch(() => null);
@@ -187,7 +187,7 @@
     await waitFor(() => !findInformationUpdatedDialog(), 5000).catch(() => null);
     await sleep(500);
 
-    const secondContinue = await waitFor(() => document.querySelector('button[data-test-id="CONTINUE_BUTTON"]') || buttonByText('Continue'));
+    const secondContinue = await waitFor(() => findContinueButton());
     clickElement(secondContinue);
     log('Clicked Continue after information update confirmation');
     await sleep(500);
@@ -513,8 +513,76 @@
   }
 
   function isCustomerInfoReady() {
-    return !!findByText('h1,.pageTitle,.tui-subtitle,h2', 'Customer information') ||
-      (location.pathname.includes('/quote/auto/personal-info') && !!document.querySelector('#policyStartDate'));
+    const pageMarker = findByText('h1,.pageTitle,.tui-subtitle,h2', 'Customer information') ||
+      location.pathname.includes('/quote/auto/personal-info');
+    return !!pageMarker &&
+      !!findInputTarget('#policyStartDate') &&
+      !!findRadioGroup({ label: 'Is the customer a business owner?', fieldClass: 'isCustomerBusinessOwner' }) &&
+      !!findRadioGroup({ label: 'Does the customer own any specialty units?', fieldClass: 'doesCustomerOwnSpecialtyVehicles' }) &&
+      !!findContinueButton();
+  }
+
+  function findContinueButton() {
+    return document.querySelector('button[data-test-id="CONTINUE_BUTTON"]') || buttonByText('Continue');
+  }
+
+  async function waitForPageReady(readyFn, label) {
+    setStatus(`Waiting for ${label} to load`);
+    await waitFor(readyFn, CFG.loadWaitMs);
+    const start = Date.now();
+    let lastSignature = '';
+    let stableSince = 0;
+
+    while (Date.now() - start < CFG.loadWaitMs) {
+      if (!readyFn() || isPageBusy()) {
+        lastSignature = '';
+        stableSince = 0;
+        await sleep(CFG.pollMs);
+        continue;
+      }
+
+      const signature = pageLoadSignature();
+      if (signature === lastSignature) {
+        if (Date.now() - stableSince >= CFG.settleMs) {
+          log(`${label} loaded`);
+          return true;
+        }
+      } else {
+        lastSignature = signature;
+        stableSince = Date.now();
+      }
+      await sleep(CFG.pollMs);
+    }
+
+    throw new Error(`${label} did not finish loading`);
+  }
+
+  function pageLoadSignature() {
+    const controls = [...document.querySelectorAll('input,textarea,select,mat-select,mat-radio-group,mat-checkbox,button')]
+      .filter((el) => !state.panel?.contains(el));
+    const controlState = controls.map((el) => [
+      el.tagName,
+      el.id || el.getAttribute('formcontrolname') || el.getAttribute('aria-label') || '',
+      'value' in el ? el.value : normalize(el.textContent).slice(0, 40),
+      'checked' in el ? String(el.checked) : ''
+    ].join(':')).join('|');
+    const textLength = normalize([...document.body.children]
+      .filter((el) => el !== state.panel)
+      .map((el) => el.textContent)
+      .join(' ')).length;
+    return `${document.readyState}|${controls.length}|${textLength}|${controlState}`;
+  }
+
+  function isPageBusy() {
+    return [...document.querySelectorAll('mat-spinner,mat-progress-spinner,.mat-mdc-progress-spinner,.mat-progress-spinner,.spinner,[aria-busy="true"]')]
+      .some((el) => !state.panel?.contains(el) && isVisible(el));
+  }
+
+  function isVisible(el) {
+    if (!el) return false;
+    const rect = el.getBoundingClientRect();
+    const style = window.getComputedStyle(el);
+    return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
   }
 
   function waitFor(fn, timeoutMs = CFG.waitMs) {

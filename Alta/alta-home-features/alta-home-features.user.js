@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Alta Home Features
 // @namespace    homebot.alta-home-features
-// @version      0.1.6
+// @version      0.1.7
 // @description  Auto-runs the Alta home-features page. Applies Alta safe defaults, leaves water leak protection untouched, and continues.
 // @author       OpenAI
 // @match        https://alta.farmers.com/*
@@ -19,14 +19,14 @@
   try { window.__ALTA_HOME_FEATURES_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'Alta Home Features';
-  const VERSION = '0.1.6';
+  const VERSION = '0.1.7';
   const KEYS = {
     currentJob: 'tm_alta_current_job_v1',
     payload: 'tm_alta_home_quote_grab_payload_v1',
     panelPos: 'tm_alta_home_features_panel_pos_v1',
     logs: 'tm_alta_home_features_logs_v1'
   };
-  const CFG = { maxLogLines: 26, waitMs: 12000, pollMs: 200, autoScanMs: 800 };
+  const CFG = { maxLogLines: 26, waitMs: 12000, loadWaitMs: 25000, settleMs: 1600, pollMs: 200, autoScanMs: 800 };
   const state = {
     panel: null,
     ui: {},
@@ -60,7 +60,7 @@
   async function runPage({ continueAfter = true } = {}) {
     try {
       setStatus('Running home features');
-      await waitFor(() => isHomeFeaturesReady());
+      await waitForPageReady(() => isHomeFeaturesReady(), 'Home features page');
 
       await setMatSelectByFormControl('firmAlarm', 'No device', false);
       await setMatSelectByFormControl('burglarAlarm', 'No device', false);
@@ -511,7 +511,23 @@
   function isHomeFeaturesReady() {
     const pageMarker = findByText('.pageTitle,.tui-subtitle,h1,h2', 'Home features') ||
       document.querySelector('mat-select[formcontrolname="firmAlarm"], mat-select[formcontrolname="burglarAlarm"], #yearBuilt, [data-test-id="LIVABLE_SQUARE_FEET_INPUT"]');
-    return pageMarker && (!document.querySelector('.sidenav-current-step') || isCurrentSideNavStep('Home features'));
+    const requiredSelectors = [
+      'mat-select[formcontrolname="firmAlarm"]',
+      'mat-select[formcontrolname="burglarAlarm"]',
+      'mat-select[formcontrolname="fortifiedHomeCertification"]',
+      'mat-select[formcontrolname="plumbing"]',
+      'mat-radio-group[formcontrolname="propertyLevelInd"]',
+      'mat-radio-group[formcontrolname="construction"]',
+      'mat-radio-group[formcontrolname="unrepairedStructuralDamage"]',
+      'mat-radio-group[formcontrolname="plumbingReplacedLast20Years"]',
+      'mat-radio-group[formcontrolname="solarPanelPresent"]',
+      '#trampolinecheckbox-input',
+      '#poolcheckbox-input'
+    ];
+    return !!pageMarker &&
+      requiredSelectors.every((selector) => !!document.querySelector(selector)) &&
+      !!buttonByText('Continue') &&
+      (!document.querySelector('.sidenav-current-step') || isCurrentSideNavStep('Home features'));
   }
 
   function isCurrentSideNavStep(label) {
@@ -531,6 +547,65 @@
       };
       tick();
     });
+  }
+
+  async function waitForPageReady(readyFn, label) {
+    setStatus(`Waiting for ${label} to load`);
+    await waitFor(readyFn, CFG.loadWaitMs);
+    const start = Date.now();
+    let lastSignature = '';
+    let stableSince = 0;
+
+    while (Date.now() - start < CFG.loadWaitMs) {
+      if (!readyFn() || isPageBusy()) {
+        lastSignature = '';
+        stableSince = 0;
+        await sleep(CFG.pollMs);
+        continue;
+      }
+
+      const signature = pageLoadSignature();
+      if (signature === lastSignature) {
+        if (Date.now() - stableSince >= CFG.settleMs) {
+          log(`${label} loaded`);
+          return true;
+        }
+      } else {
+        lastSignature = signature;
+        stableSince = Date.now();
+      }
+      await sleep(CFG.pollMs);
+    }
+
+    throw new Error(`${label} did not finish loading`);
+  }
+
+  function pageLoadSignature() {
+    const controls = [...document.querySelectorAll('input,textarea,select,mat-select,mat-radio-group,mat-checkbox,button')]
+      .filter((el) => !state.panel?.contains(el));
+    const controlState = controls.map((el) => [
+      el.tagName,
+      el.id || el.getAttribute('formcontrolname') || el.getAttribute('aria-label') || '',
+      'value' in el ? el.value : normalize(el.textContent).slice(0, 40),
+      'checked' in el ? String(el.checked) : ''
+    ].join(':')).join('|');
+    const textLength = normalize([...document.body.children]
+      .filter((el) => el !== state.panel)
+      .map((el) => el.textContent)
+      .join(' ')).length;
+    return `${document.readyState}|${controls.length}|${textLength}|${controlState}`;
+  }
+
+  function isPageBusy() {
+    return [...document.querySelectorAll('mat-spinner,mat-progress-spinner,.mat-mdc-progress-spinner,.mat-progress-spinner,.spinner,[aria-busy="true"]')]
+      .some((el) => !state.panel?.contains(el) && isVisible(el));
+  }
+
+  function isVisible(el) {
+    if (!el) return false;
+    const rect = el.getBoundingClientRect();
+    const style = window.getComputedStyle(el);
+    return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
   }
 
   function valueOf(el) {

@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         Alta Customer Info
 // @namespace    homebot.alta-customer-info
-// @version      0.1.4
+// @version      0.1.5
 // @description  Manual Alta customer-info page runner. Sets today's policy start date, confirms default customer questions, acknowledges disclosures, and continues.
 // @author       OpenAI
-// @match        https://alta.farmers.com/quote/auto/personal-info*
+// @match        https://alta.farmers.com/*
 // @run-at       document-idle
 // @noframes
 // @grant        none
@@ -19,7 +19,7 @@
   try { window.__ALTA_CUSTOMER_INFO_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'Alta Customer Info';
-  const VERSION = '0.1.4';
+  const VERSION = '0.1.5';
   const KEYS = {
     currentJob: 'tm_alta_current_job_v1',
     payload: 'tm_alta_home_quote_grab_payload_v1',

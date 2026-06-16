@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         Alta Replacement Cost Updater
 // @namespace    homebot.alta-replacement-cost.updater
-// @version      0.1.1
+// @version      0.1.2
 // @description  Loads and auto-updates the Alta Replacement Cost script from GitHub.
 // @author       OpenAI
-// @match        https://alta.farmers.com/quote/*
+// @match        https://alta.farmers.com/*
 // @run-at       document-idle
 // @noframes
 // @grant        GM_xmlhttpRequest
@@ -23,7 +23,7 @@
 
 (function () {
   'use strict';
-  const LOADER_VERSION = '0.1.1';
+  const LOADER_VERSION = '0.1.2';
   const TARGET_ID = 'alta-replacement-cost';
   const TARGET_LABEL = 'Alta Replacement Cost';
   const TARGET_FILE = 'alta-replacement-cost.user.js';

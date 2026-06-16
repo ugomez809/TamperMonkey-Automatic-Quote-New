@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         Alta Home Features Updater
 // @namespace    homebot.alta-home-features.updater
-// @version      0.1.1
+// @version      0.1.2
 // @description  Loads and auto-updates the Alta Home Features script from GitHub.
 // @author       OpenAI
-// @match        https://alta.farmers.com/quote/*
+// @match        https://alta.farmers.com/*
 // @run-at       document-idle
 // @noframes
 // @grant        GM_xmlhttpRequest
@@ -23,7 +23,7 @@
 
 (function () {
   'use strict';
-  const LOADER_VERSION = '0.1.1';
+  const LOADER_VERSION = '0.1.2';
   const TARGET_ID = 'alta-home-features';
   const TARGET_LABEL = 'Alta Home Features';
   const TARGET_FILE = 'alta-home-features.user.js';

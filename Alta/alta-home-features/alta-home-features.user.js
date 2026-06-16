@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name         Alta Home Features
 // @namespace    homebot.alta-home-features
-// @version      0.1.3
+// @version      0.1.4
 // @description  Manual Alta home-features page runner. Applies Alta safe defaults, leaves water leak protection untouched, and continues.
 // @author       OpenAI
-// @match        https://alta.farmers.com/quote/*
+// @match        https://alta.farmers.com/*
 // @run-at       document-idle
 // @noframes
 // @grant        none
@@ -19,7 +19,7 @@
   try { window.__ALTA_HOME_FEATURES_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'Alta Home Features';
-  const VERSION = '0.1.3';
+  const VERSION = '0.1.4';
   const KEYS = {
     currentJob: 'tm_alta_current_job_v1',
     payload: 'tm_alta_home_quote_grab_payload_v1',

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Alta Home Coverage
 // @namespace    homebot.alta-home-coverage
-// @version      0.1.10
+// @version      0.1.11
 // @description  Manual Alta home-coverage page runner. Sets All Perils to 5000, Split Water to 5 percent, captures pricing, and publishes the Alta home payload.
 // @author       OpenAI
 // @match        https://alta.farmers.com/*
@@ -19,14 +19,14 @@
   try { window.__ALTA_HOME_COVERAGE_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'Alta Home Coverage';
-  const VERSION = '0.1.10';
+  const VERSION = '0.1.11';
   const KEYS = {
     currentJob: 'tm_alta_current_job_v1',
     payload: 'tm_alta_home_quote_grab_payload_v1',
     panelPos: 'tm_alta_home_coverage_panel_pos_v1',
     logs: 'tm_alta_home_coverage_logs_v1'
   };
-  const CFG = { maxLogLines: 40, waitMs: 12000, pollMs: 200, recalcWaitMs: 8000, priceWaitMs: 60000 };
+  const CFG = { maxLogLines: 40, waitMs: 12000, pollMs: 200, recalcWaitMs: 8000, recalcNudgeMs: 15000, recalcRetryWaitMs: 3000, priceWaitMs: 60000 };
   const state = { panel: null, ui: {}, logs: [] };
 
   init();
@@ -172,7 +172,7 @@
         await setCoverageTemplate(scenario.template, true);
         await setHomeAutoDiscount(scenario.autoDiscount, true);
         await applyCoverageDefaults();
-        const price = await recalculateAndCapturePrice(lastAmount);
+        const price = await recalculateAndCapturePrice(lastAmount, scenario.autoDiscount);
         const amount = price.totalWithFees || price.termPremium || '';
         lastPrice = price;
 
@@ -209,30 +209,35 @@
     await setMatSelectByAria('Policy deductibles-Split water-', '(5.0%)', false);
   }
 
-  async function recalculateAndCapturePrice(previousAmount = '') {
+  async function recalculateAndCapturePrice(previousAmount = '', targetAutoDiscount = false) {
     const before = capturePrice();
     const beforeAmount = previousAmount || before.totalWithFees || before.termPremium || '';
-    const cta = await waitFor(() => findRecalculateButton(), CFG.recalcWaitMs).catch(() => null);
-    if (cta) {
-      clickElement(cta);
-      log(`Clicked recalculation CTA: ${normalize(cta.textContent) || 'button'}`);
-      await sleep(1500);
-    } else {
-      const quoteCta = document.querySelector('button[data-test-id="TUI_REVIEW_COVERAGE_CARD_CTA"]');
-      const label = normalize(quoteCta?.textContent);
-      log(label && /^go$/i.test(label)
-        ? 'Recalculate button not available; leaving Go alone'
-        : 'Recalculate button not available; reading current price');
-    }
+    const start = Date.now();
+    let nextNudgeAt = start + CFG.recalcNudgeMs;
+    await clickRecalculateIfAvailable(CFG.recalcWaitMs);
 
-    const freshPrice = await waitFor(() => {
+    while (Date.now() - start < CFG.priceWaitMs) {
       const price = capturePrice();
       const amount = price.totalWithFees || price.termPremium || '';
-      if (!price.valid || !amount) return null;
-      if (beforeAmount && amount === beforeAmount) return null;
-      return price;
-    }, CFG.priceWaitMs).catch(() => null);
-    if (freshPrice) return freshPrice;
+      if (price.valid && amount && (!beforeAmount || amount !== beforeAmount)) return price;
+
+      const recalc = findRecalculateButton();
+      if (recalc) {
+        clickElement(recalc);
+        log(`Clicked recalculation CTA: ${normalize(recalc.textContent) || 'button'}`);
+        await sleep(1500);
+        nextNudgeAt = Date.now() + CFG.recalcNudgeMs;
+        continue;
+      }
+
+      if (Date.now() >= nextNudgeAt) {
+        await cycleHomeAutoDiscount(targetAutoDiscount);
+        nextNudgeAt = Date.now() + CFG.recalcNudgeMs;
+        await clickRecalculateIfAvailable(CFG.recalcRetryWaitMs);
+      }
+
+      await sleep(CFG.pollMs);
+    }
 
     const current = capturePrice();
     const currentAmount = current.totalWithFees || current.termPremium || '';
@@ -247,6 +252,32 @@
       log('Premium wait timed out; using current price');
     }
     return current;
+  }
+
+  async function clickRecalculateIfAvailable(waitMs = CFG.recalcWaitMs) {
+    const cta = await waitFor(() => findRecalculateButton(), waitMs).catch(() => null);
+    if (cta) {
+      clickElement(cta);
+      log(`Clicked recalculation CTA: ${normalize(cta.textContent) || 'button'}`);
+      await sleep(1500);
+      return true;
+    }
+
+    const quoteCta = document.querySelector('button[data-test-id="TUI_REVIEW_COVERAGE_CARD_CTA"]');
+    const label = normalize(quoteCta?.textContent);
+    log(label && /^go$/i.test(label)
+      ? 'Recalculate button not available; leaving Go alone'
+      : 'Recalculate button not available; reading current price');
+    return false;
+  }
+
+  async function cycleHomeAutoDiscount(targetEnabled) {
+    const first = !targetEnabled;
+    log(`Recalculate still unavailable; cycling Home/Auto discount ${first ? 'on' : 'off'} then ${targetEnabled ? 'on' : 'off'}`);
+    await setHomeAutoDiscount(first, true);
+    await sleep(700);
+    await setHomeAutoDiscount(targetEnabled, true);
+    await sleep(700);
   }
 
   function findRecalculateButton() {
@@ -596,13 +627,63 @@
 
   function clickElement(el) {
     if (!el) return false;
+    try { el.scrollIntoView?.({ block: 'center', inline: 'nearest' }); } catch {}
+    try { el.focus?.({ preventScroll: true }); } catch {}
+
+    const win = el.ownerDocument?.defaultView || window;
+    const rect = el.getBoundingClientRect?.();
+    const clientX = rect ? rect.left + (rect.width / 2) : 0;
+    const clientY = rect ? rect.top + (rect.height / 2) : 0;
+    const mouseBase = {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      view: win,
+      clientX,
+      clientY,
+      screenX: clientX,
+      screenY: clientY,
+      button: 0
+    };
+    const fireMouse = (type, extra = {}) => {
+      try {
+        return el.dispatchEvent(new (win.MouseEvent || MouseEvent)(type, { ...mouseBase, ...extra }));
+      } catch {
+        return false;
+      }
+    };
+    const firePointer = (type, extra = {}) => {
+      const PointerEventCtor = win.PointerEvent || window.PointerEvent;
+      if (!PointerEventCtor) return false;
+      try {
+        return el.dispatchEvent(new PointerEventCtor(type, {
+          ...mouseBase,
+          pointerId: 1,
+          pointerType: 'mouse',
+          isPrimary: true,
+          ...extra
+        }));
+      } catch {
+        return false;
+      }
+    };
+
     try {
+      firePointer('pointerover', { buttons: 0 });
+      fireMouse('mouseover', { buttons: 0 });
+      firePointer('pointermove', { buttons: 0 });
+      fireMouse('mousemove', { buttons: 0 });
+      firePointer('pointerdown', { buttons: 1 });
+      fireMouse('mousedown', { buttons: 1 });
+      firePointer('pointerup', { buttons: 0 });
+      fireMouse('mouseup', { buttons: 0 });
       el.click();
       return true;
     } catch {}
-    const win = el.ownerDocument?.defaultView || window;
-    const MouseEventCtor = win.MouseEvent || MouseEvent;
-    return el.dispatchEvent(new MouseEventCtor('click', { bubbles: true, cancelable: true, composed: true }));
+
+    firePointer('pointerup', { buttons: 0 });
+    fireMouse('mouseup', { buttons: 0 });
+    return fireMouse('click', { buttons: 0 });
   }
 
   function isDisabled(el) {

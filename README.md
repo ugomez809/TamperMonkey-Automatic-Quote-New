@@ -49,6 +49,7 @@ Active Alta Home quote scripts live in `Alta/`.
 | `alta-home-features/` | Runs on Alta home features. |
 | `alta-replacement-cost/` | Runs on Alta replacement cost. |
 | `alta-home-coverage/` | Runs on Alta home coverage and publishes quote data. |
+| `alta-error-fixer/` | Watches Alta knockout dialogs and applies known Home quote fixes. |
 | `alta-updater-installer/` | Opens only the active AgencyZoom/APEX/Alta updater install links. |
 | `ui-dock-organizer/` | Cross-origin UI fixer that keeps floating helper panels organized on AgencyZoom, APEX, and Alta. |
 

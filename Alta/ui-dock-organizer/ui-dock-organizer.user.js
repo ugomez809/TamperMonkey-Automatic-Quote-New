@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Cross-Origin UI Dock Organizer
 // @namespace    homebot.ui-dock-organizer
-// @version      1.7.10
+// @version      1.7.11
 // @description  Organizes floating UIs safely inside the viewport. Biggest panel anchors bottom-right, others stack to the left within the anchor height, then continue upward on the right. On Alta, the organizer panel itself stays top-right. Includes active-script highlighting for opted-in panels.
 // @author       OpenAI
 // @match        https://app.agencyzoom.com/*
@@ -23,7 +23,7 @@
   try { window.__HB_UI_DOCK_ORGANIZER_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'Cross-Origin UI Dock Organizer';
-  const VERSION = '1.7.10';
+  const VERSION = '1.7.11';
 
   // Log-export integration - workflow-origin dynamic key.
   const LOG_PERSIST_KEY = (() => {
@@ -99,7 +99,8 @@
       'alta-customer-info',
       'alta-home-features',
       'alta-replacement-cost',
-      'alta-home-coverage'
+      'alta-home-coverage',
+      'alta-error-fixer'
     ],
     workflow: []
   };
@@ -115,7 +116,8 @@
     'alta-customer-info-panel': 'alta-customer-info',
     'alta-home-features-panel': 'alta-home-features',
     'alta-replacement-cost-panel': 'alta-replacement-cost',
-    'alta-home-coverage-panel': 'alta-home-coverage'
+    'alta-home-coverage-panel': 'alta-home-coverage',
+    'alta-error-fixer-panel': 'alta-error-fixer'
   };
 
   const state = {

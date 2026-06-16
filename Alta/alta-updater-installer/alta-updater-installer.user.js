@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Alta Quoting Updater Installer
 // @namespace    homebot.alta-updater-installer
-// @version      0.2.2
+// @version      0.2.3
 // @description  Opens the updater-only install links for the AgencyZoom, APEX, and Alta quoting workflow.
 // @author       OpenAI
 // @match        https://github.com/ugomez809/TamperMonkey-Automatic-Quote-New*
@@ -32,6 +32,7 @@
     ['Alta Home Features Updater', 'Alta/alta-home-features/alta-home-features-updater.user.js'],
     ['Alta Replacement Cost Updater', 'Alta/alta-replacement-cost/alta-replacement-cost-updater.user.js'],
     ['Alta Home Coverage Updater', 'Alta/alta-home-coverage/alta-home-coverage-updater.user.js'],
+    ['Alta Error Fixer Updater', 'Alta/alta-error-fixer/alta-error-fixer-updater.user.js'],
     ['Alta Quoting Updater Installer Updater', 'Alta/alta-updater-installer/alta-updater-installer-updater.user.js']
   ];
 

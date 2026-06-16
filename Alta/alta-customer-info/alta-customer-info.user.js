@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Alta Customer Info
 // @namespace    homebot.alta-customer-info
-// @version      0.1.5
+// @version      0.1.6
 // @description  Manual Alta customer-info page runner. Sets today's policy start date, confirms default customer questions, acknowledges disclosures, and continues.
 // @author       OpenAI
 // @match        https://alta.farmers.com/*
@@ -19,7 +19,7 @@
   try { window.__ALTA_CUSTOMER_INFO_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'Alta Customer Info';
-  const VERSION = '0.1.5';
+  const VERSION = '0.1.6';
   const KEYS = {
     currentJob: 'tm_alta_current_job_v1',
     payload: 'tm_alta_home_quote_grab_payload_v1',
@@ -105,6 +105,20 @@
   async function clickContinue() {
     const btn = await waitFor(() => document.querySelector('button[data-test-id="CONTINUE_BUTTON"]') || buttonByText('Continue'));
     clickElement(btn);
+    await sleep(500);
+    const dialog = await waitFor(() => findInformationUpdatedDialog(), 2500).catch(() => null);
+    if (!dialog) return;
+
+    const confirm = buttonByText('Yes, continue quote', dialog);
+    if (!confirm) throw new Error('Information updated dialog shown, but confirm button was not found');
+    log('Information updated dialog shown; confirming changes');
+    clickElement(confirm);
+    await waitFor(() => !findInformationUpdatedDialog(), 5000).catch(() => null);
+    await sleep(500);
+
+    const secondContinue = await waitFor(() => document.querySelector('button[data-test-id="CONTINUE_BUTTON"]') || buttonByText('Continue'));
+    clickElement(secondContinue);
+    log('Clicked Continue after information update confirmation');
     await sleep(500);
   }
 
@@ -404,9 +418,18 @@
     return el.dispatchEvent(new MouseEventCtor('click', { bubbles: true, cancelable: true, composed: true }));
   }
 
-  function buttonByText(text) {
+  function buttonByText(text, root = document) {
     const wanted = normalize(text).toLowerCase();
-    return [...document.querySelectorAll('button')].find((btn) => normalize(btn.textContent).toLowerCase() === wanted);
+    return [...root.querySelectorAll('button')].find((btn) => normalize(btn.textContent).toLowerCase() === wanted);
+  }
+
+  function findInformationUpdatedDialog() {
+    const dialogs = [...document.querySelectorAll('[role="dialog"], mat-dialog-container, .personal-info-popup-container')];
+    return dialogs.find((dialog) => {
+      const label = normalize(dialog.getAttribute('aria-label')).toLowerCase();
+      const text = normalize(dialog.textContent).toLowerCase();
+      return label === 'information updated' || (text.includes('information updated') && text.includes('yes, continue quote'));
+    });
   }
 
   function findByText(selector, text) {

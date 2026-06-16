@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Alta Home Coverage
 // @namespace    homebot.alta-home-coverage
-// @version      0.1.9
+// @version      0.1.10
 // @description  Manual Alta home-coverage page runner. Sets All Perils to 5000, Split Water to 5 percent, captures pricing, and publishes the Alta home payload.
 // @author       OpenAI
 // @match        https://alta.farmers.com/*
@@ -19,7 +19,7 @@
   try { window.__ALTA_HOME_COVERAGE_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'Alta Home Coverage';
-  const VERSION = '0.1.9';
+  const VERSION = '0.1.10';
   const KEYS = {
     currentJob: 'tm_alta_current_job_v1',
     payload: 'tm_alta_home_quote_grab_payload_v1',
@@ -143,10 +143,10 @@
 
   async function captureAllPricing() {
     const scenarios = [
-      { field: 'Standard Pricing No Auto Discount', template: 'Standard', autoDiscount: false },
-      { field: 'Standard Pricing Auto Discount', template: 'Standard', autoDiscount: true },
       { field: 'Enhance Pricing No Auto Discount', template: 'Enhanced', autoDiscount: false },
-      { field: 'Enhance Pricing Auto Discount', template: 'Enhanced', autoDiscount: true }
+      { field: 'Enhance Pricing Auto Discount', template: 'Enhanced', autoDiscount: true },
+      { field: 'Standard Pricing No Auto Discount', template: 'Standard', autoDiscount: false },
+      { field: 'Standard Pricing Auto Discount', template: 'Standard', autoDiscount: true }
     ];
     const rowUpdates = {};
     const runs = [];

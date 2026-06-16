@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Alta Home Coverage
 // @namespace    homebot.alta-home-coverage
-// @version      0.1.10
+// @version      0.1.9
 // @description  Manual Alta home-coverage page runner. Sets All Perils to 5000, Split Water to 5 percent, captures pricing, and publishes the Alta home payload.
 // @author       OpenAI
 // @match        https://alta.farmers.com/*
@@ -19,7 +19,7 @@
   try { window.__ALTA_HOME_COVERAGE_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'Alta Home Coverage';
-  const VERSION = '0.1.10';
+  const VERSION = '0.1.9';
   const KEYS = {
     currentJob: 'tm_alta_current_job_v1',
     payload: 'tm_alta_home_quote_grab_payload_v1',
@@ -218,15 +218,11 @@
       log(`Clicked recalculation CTA: ${normalize(cta.textContent) || 'button'}`);
       await sleep(1500);
     } else {
-      const quoteCta = findCoverageCardCta();
+      const quoteCta = document.querySelector('button[data-test-id="TUI_REVIEW_COVERAGE_CARD_CTA"]');
       const label = normalize(quoteCta?.textContent);
-      if (quoteCta && /^go$/i.test(label)) {
-        clickElement(quoteCta);
-        log('Recalculate button not available; clicked coverage CTA: Go');
-        await sleep(1500);
-      } else {
-        log('Recalculate button not available; reading current price');
-      }
+      log(label && /^go$/i.test(label)
+        ? 'Recalculate button not available; leaving Go alone'
+        : 'Recalculate button not available; reading current price');
     }
 
     const freshPrice = await waitFor(() => {
@@ -260,11 +256,6 @@
       ...document.querySelectorAll('button')
     ].filter(Boolean);
     return buttons.find((button) => isVisible(button) && !isDisabled(button) && /^recalculate$/i.test(normalize(button.textContent)));
-  }
-
-  function findCoverageCardCta() {
-    const button = document.querySelector('button[data-test-id="TUI_REVIEW_COVERAGE_CARD_CTA"]');
-    return button && isVisible(button) && !isDisabled(button) ? button : null;
   }
 
   async function setHomeAutoDiscount(enabled, required = true) {

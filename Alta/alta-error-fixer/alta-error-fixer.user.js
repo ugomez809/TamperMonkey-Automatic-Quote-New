@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Alta Error Fixer
 // @namespace    homebot.alta-error-fixer
-// @version      0.1.2
+// @version      0.1.3
 // @description  Watches Alta knockout dialogs and applies known Home quote fixes.
 // @author       OpenAI
 // @match        https://alta.farmers.com/*
@@ -19,11 +19,13 @@
   try { window.__ALTA_ERROR_FIXER_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'Alta Error Fixer';
-  const VERSION = '0.1.2';
+  const VERSION = '0.1.3';
   const KEYS = {
+    currentJob: 'tm_alta_current_job_v1',
     panelPos: 'tm_alta_error_fixer_panel_pos_v1',
     logs: 'tm_alta_error_fixer_logs_v1',
-    flowLock: 'tm_alta_error_fixer_flow_lock_v1'
+    flowLock: 'tm_alta_error_fixer_flow_lock_v1',
+    waterDeviceDecision: 'tm_alta_water_device_added_v1'
   };
   const CFG = {
     maxLogLines: 30,
@@ -190,6 +192,7 @@
 
       await waitForPageReady(() => !!findRadioGroupByFormControl('automaticWaterShutOff'), 'Automatic water shut off');
       await clickRadioByFormControl('automaticWaterShutOff', 'yes', 'Automatic water shut off');
+      markWaterDeviceAdded();
 
       await clickContinueButton('Home features');
       await waitForPageReady(() => isReplacementCostReady(), 'Replacement cost');
@@ -533,6 +536,20 @@
 
   function clearFlowLock() {
     try { localStorage.removeItem(KEYS.flowLock); } catch {}
+  }
+
+  function markWaterDeviceAdded() {
+    const job = readJson(KEYS.currentJob) || readJson('tm_shared_az_job_v1') || {};
+    const azId = normalize(job['AZ ID'] || job.ticketId || job.azId || '');
+    writeJson(KEYS.waterDeviceDecision, {
+      added: true,
+      azId,
+      reason: 'water-leak-auto-shutoff',
+      source: SCRIPT_NAME,
+      version: VERSION,
+      updatedAt: new Date().toISOString()
+    });
+    log(`Water Device? marked Yes${azId ? ` for AZ ${azId}` : ''}`);
   }
 
   function waitFor(fn, timeoutMs = CFG.waitMs) {

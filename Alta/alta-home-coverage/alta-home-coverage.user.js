@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Alta Home Coverage
 // @namespace    homebot.alta-home-coverage
-// @version      0.1.11
+// @version      0.1.12
 // @description  Manual Alta home-coverage page runner. Sets All Perils to 5000, Split Water to 5 percent, captures pricing, and publishes the Alta home payload.
 // @author       OpenAI
 // @match        https://alta.farmers.com/*
@@ -19,12 +19,13 @@
   try { window.__ALTA_HOME_COVERAGE_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'Alta Home Coverage';
-  const VERSION = '0.1.11';
+  const VERSION = '0.1.12';
   const KEYS = {
     currentJob: 'tm_alta_current_job_v1',
     payload: 'tm_alta_home_quote_grab_payload_v1',
     panelPos: 'tm_alta_home_coverage_panel_pos_v1',
-    logs: 'tm_alta_home_coverage_logs_v1'
+    logs: 'tm_alta_home_coverage_logs_v1',
+    waterDeviceDecision: 'tm_alta_water_device_added_v1'
   };
   const CFG = { maxLogLines: 40, waitMs: 12000, pollMs: 200, recalcWaitMs: 8000, recalcNudgeMs: 15000, recalcRetryWaitMs: 3000, priceWaitMs: 60000 };
   const state = { panel: null, ui: {}, logs: [] };
@@ -66,7 +67,7 @@
         'Date Processed?': formatDate(new Date()),
         'Done?': complete ? 'Yes' : 'No',
         Result: result,
-        'Water Device?': ''
+        'Water Device?': waterDeviceAnswer()
       };
       if (submissionNumber) rowUpdates['Submission Number'] = submissionNumber;
       const payload = updatePayload(rowUpdates, { homeCoverageComplete: complete, finalRefreshComplete: complete }, publish && complete, {
@@ -85,7 +86,7 @@
       updatePayload({
         'Done?': 'No',
         Result: `Alta coverage error: ${err?.message || err}`,
-        'Water Device?': ''
+        'Water Device?': waterDeviceAnswer()
       }, { homeCoverageComplete: false }, false, {});
     }
   }
@@ -446,11 +447,12 @@
   function updatePayload(rowUpdates, progressUpdates, ready, extraMeta) {
     const old = readJson(KEYS.payload) || {};
     const job = readJob();
+    const waterDevice = normalize(rowUpdates?.['Water Device?']) || waterDeviceAnswer(job);
     const row = {
       ...defaultRow(job),
       ...(old.row || {}),
       ...rowUpdates,
-      'Water Device?': ''
+      'Water Device?': waterDevice
     };
     const payload = {
       script: SCRIPT_NAME,
@@ -520,6 +522,13 @@
 
   function readJob() {
     return readJson(KEYS.currentJob) || readJson('tm_shared_az_job_v1') || {};
+  }
+
+  function waterDeviceAnswer(job = readJob()) {
+    const decision = readJson(KEYS.waterDeviceDecision);
+    const currentAzId = normalize(job['AZ ID'] || job.ticketId || job.azId || '');
+    const decisionAzId = normalize(decision?.azId || '');
+    return decision?.added === true && currentAzId && decisionAzId === currentAzId ? 'Yes' : 'No';
   }
 
   function fullName(job) {

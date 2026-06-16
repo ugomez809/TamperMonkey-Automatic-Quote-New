@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Alta Error Fixer
 // @namespace    homebot.alta-error-fixer
-// @version      0.1.1
+// @version      0.1.2
 // @description  Watches Alta knockout dialogs and applies known Home quote fixes.
 // @author       OpenAI
 // @match        https://alta.farmers.com/*
@@ -19,7 +19,7 @@
   try { window.__ALTA_ERROR_FIXER_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'Alta Error Fixer';
-  const VERSION = '0.1.1';
+  const VERSION = '0.1.2';
   const KEYS = {
     panelPos: 'tm_alta_error_fixer_panel_pos_v1',
     logs: 'tm_alta_error_fixer_logs_v1',
@@ -185,8 +185,8 @@
       await goToSideNavStep('Home features');
       await waitForPageReady(() => isHomeFeaturesWaterFixReady(), 'Home features');
 
-      const waterSelect = await waitFor(() => findMatSelectByFormControl('fortifiedHomeCertification'), CFG.waitMs);
-      await setMatSelectValue(waterSelect, 'Whole house water detection', 'FORTIFIED Home certification', () => findMatSelectByFormControl('fortifiedHomeCertification'));
+      const waterSelect = await waitFor(() => findWaterLeakProtectionSelect(), CFG.waitMs);
+      await setMatSelectValue(waterSelect, 'Whole house water detection', 'Water leak protection device', findWaterLeakProtectionSelect);
 
       await waitForPageReady(() => !!findRadioGroupByFormControl('automaticWaterShutOff'), 'Automatic water shut off');
       await clickRadioByFormControl('automaticWaterShutOff', 'yes', 'Automatic water shut off');
@@ -242,6 +242,15 @@
       selects.find((select) => normalize(select.closest('.input-main-section, [class*="input-main-section"], [class*="coverage"]')?.textContent).toLowerCase().includes('roof valuation'));
   }
 
+  function findWaterLeakProtectionSelect() {
+    const exact = findMatSelectByFormControl('waterLeak');
+    if (exact) return exact;
+
+    const selects = [...document.querySelectorAll('mat-select')];
+    return selects.find((select) => normalize(select.getAttribute('aria-label')).toLowerCase().includes('water leak protection')) ||
+      selects.find((select) => normalize(select.closest('.row, [class*="row"], [class*="section"]')?.textContent).toLowerCase().includes('water leak protection'));
+  }
+
   function findMatSelectByFormControl(name) {
     return document.querySelector(`mat-select[formcontrolname="${cssAttr(name)}"]`);
   }
@@ -267,7 +276,7 @@
   }
 
   function isHomeFeaturesWaterFixReady() {
-    return !!findMatSelectByFormControl('fortifiedHomeCertification') &&
+    return !!findWaterLeakProtectionSelect() &&
       !!findContinueButton() &&
       (!document.querySelector('.sidenav-current-step') || isCurrentSideNavStep('Home features'));
   }

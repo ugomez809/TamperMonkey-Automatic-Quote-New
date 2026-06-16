@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Alta Payload Bridge
 // @namespace    homebot.alta-payload-bridge
-// @version      0.1.1
+// @version      0.1.2
 // @description  Mirrors AgencyZoom/APEX job data into Alta and mirrors Alta home quote results back to AgencyZoom.
 // @author       OpenAI
 // @match        https://app.agencyzoom.com/*
@@ -24,7 +24,7 @@
   try { window.__ALTA_PAYLOAD_BRIDGE_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'Alta Payload Bridge';
-  const VERSION = '0.1.1';
+  const VERSION = '0.1.2';
 
   const SHARED = {
     currentJob: 'tm_alta_bridge_current_job_v1',
@@ -156,13 +156,18 @@
     if (homePayload?.['AZ ID']) {
       writeShared(SHARED.homePayload, withBridgeMeta(homePayload, 'Alta home payload'));
       if (homePayload.ready) {
-        const finalPayload = buildFinalPayload(homePayload);
+        const finalSignalKey = buildFinalSignalKey(homePayload);
+        const existingReady = readShared(SHARED.finalReady);
+        if (existingReady?.ready && normalizeText(existingReady.signalKey) === finalSignalKey) return;
+
+        const finalPayload = buildFinalPayload(homePayload, finalSignalKey);
         const finalReady = {
           ready: true,
           azId: finalPayload.azId,
           savedAt: finalPayload.savedAt,
           signalPostedAt: finalPayload.signalPostedAt,
           signalKey: finalPayload.signalKey,
+          homePayloadSavedAt: normalizeText(homePayload.savedAt || ''),
           source: SCRIPT_NAME,
           version: VERSION
         };
@@ -175,11 +180,17 @@
     }
   }
 
-  function buildFinalPayload(homePayload) {
+  function buildFinalSignalKey(homePayload) {
     const azId = normalizeText(homePayload['AZ ID'] || homePayload?.currentJob?.['AZ ID'] || '');
-    const savedAt = nowIso();
-    const signalPostedAt = savedAt;
-    const signalKey = `${azId}|${signalPostedAt}`;
+    const homePayloadSavedAt = normalizeText(homePayload.savedAt || homePayload?.meta?.updatedAt || '');
+    return `${azId}|${homePayloadSavedAt || 'ready'}`;
+  }
+
+  function buildFinalPayload(homePayload, signalKey = '') {
+    const azId = normalizeText(homePayload['AZ ID'] || homePayload?.currentJob?.['AZ ID'] || '');
+    const savedAt = normalizeText(homePayload.savedAt || homePayload?.meta?.updatedAt || nowIso());
+    const signalPostedAt = nowIso();
+    const finalSignalKey = normalizeText(signalKey) || `${azId}|${savedAt}`;
     const currentJob = homePayload.currentJob || readLocalJson(LOCAL.altaCurrentJob) || {};
     const home = {
       ready: !!homePayload.ready,
@@ -195,7 +206,7 @@
       azId,
       savedAt,
       signalPostedAt,
-      signalKey,
+      signalKey: finalSignalKey,
       source: 'Alta',
       currentJob,
       bundle: {
@@ -269,6 +280,7 @@
   }
 
   function withBridgeMeta(value, label) {
+    const stableSavedAt = normalizeText(value?.bridgeMeta?.savedAt || value?.savedAt || value?.updatedAt || value?.meta?.updatedAt || '');
     return {
       ...(isPlainObject(value) ? value : { value }),
       bridgeMeta: {
@@ -277,7 +289,7 @@
         version: VERSION,
         host: location.hostname,
         url: location.href,
-        savedAt: nowIso()
+        savedAt: stableSavedAt || nowIso()
       }
     };
   }
@@ -303,7 +315,14 @@
   }
 
   function writeLocalJson(key, value) {
-    try { localStorage.setItem(key, JSON.stringify(value, null, 2)); } catch {}
+    try {
+      const next = JSON.stringify(value, null, 2);
+      if (localStorage.getItem(key) === next) return false;
+      localStorage.setItem(key, next);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   function readShared(key) {
@@ -314,7 +333,16 @@
   }
 
   function writeShared(key, value) {
-    try { GM_setValue(key, JSON.stringify(value)); } catch {}
+    try {
+      const next = JSON.stringify(value);
+      const current = GM_getValue(key, null);
+      const currentText = typeof current === 'string' ? current : JSON.stringify(current);
+      if (currentText === next) return false;
+      GM_setValue(key, next);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   function isPlainObject(value) {

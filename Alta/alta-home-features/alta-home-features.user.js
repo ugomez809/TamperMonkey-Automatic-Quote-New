@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Alta Home Features
 // @namespace    homebot.alta-home-features
-// @version      0.1.4
-// @description  Manual Alta home-features page runner. Applies Alta safe defaults, leaves water leak protection untouched, and continues.
+// @version      0.1.5
+// @description  Auto-runs the Alta home-features page. Applies Alta safe defaults, leaves water leak protection untouched, and continues.
 // @author       OpenAI
 // @match        https://alta.farmers.com/*
 // @run-at       document-idle
@@ -19,15 +19,24 @@
   try { window.__ALTA_HOME_FEATURES_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'Alta Home Features';
-  const VERSION = '0.1.4';
+  const VERSION = '0.1.5';
   const KEYS = {
     currentJob: 'tm_alta_current_job_v1',
     payload: 'tm_alta_home_quote_grab_payload_v1',
     panelPos: 'tm_alta_home_features_panel_pos_v1',
     logs: 'tm_alta_home_features_logs_v1'
   };
-  const CFG = { maxLogLines: 26, waitMs: 12000, pollMs: 200 };
-  const state = { panel: null, ui: {}, logs: [] };
+  const CFG = { maxLogLines: 26, waitMs: 12000, pollMs: 200, autoScanMs: 800 };
+  const state = {
+    panel: null,
+    ui: {},
+    logs: [],
+    destroyed: false,
+    paused: false,
+    running: false,
+    autoTimer: null,
+    lastAutoKey: ''
+  };
 
   init();
 
@@ -37,10 +46,13 @@
     restorePanelPos();
     loadLogs();
     log(`Loaded v${VERSION}`);
+    startAutoRun();
     window.__ALTA_HOME_FEATURES_CLEANUP__ = cleanup;
   }
 
   function cleanup() {
+    state.destroyed = true;
+    if (state.autoTimer) clearInterval(state.autoTimer);
     try { state.panel?.remove(); } catch {}
     try { delete window.__ALTA_HOME_FEATURES_CLEANUP__; } catch {}
   }
@@ -76,10 +88,70 @@
         log('Fill only complete');
       }
       setStatus('Done');
+      return true;
     } catch (err) {
       setStatus('Error');
       log(`Error: ${err?.message || err}`);
+      return false;
     }
+  }
+
+  function startAutoRun() {
+    setStatus('Auto-run watching');
+    state.autoTimer = setInterval(autoRunTick, CFG.autoScanMs);
+    autoRunTick();
+  }
+
+  function autoRunTick() {
+    if (state.destroyed || state.running) return;
+    if (state.paused) {
+      setStatus('Paused for this tab');
+      return;
+    }
+    if (!isHomeFeaturesReady()) {
+      state.lastAutoKey = '';
+      return;
+    }
+
+    const key = autoPageKey();
+    if (state.lastAutoKey === key) return;
+    state.lastAutoKey = key;
+    log('Auto-run triggered');
+    startRun({ continueAfter: true });
+  }
+
+  async function startRun(options) {
+    if (state.running) {
+      log('Run already in progress');
+      return false;
+    }
+    state.running = true;
+    updatePauseButton();
+    try {
+      return await runPage(options);
+    } finally {
+      state.running = false;
+      updatePauseButton();
+    }
+  }
+
+  function togglePause() {
+    state.paused = !state.paused;
+    log(state.paused ? 'Paused auto-run for this tab' : 'Auto-run resumed');
+    setStatus(state.paused ? 'Paused for this tab' : 'Auto-run watching');
+    updatePauseButton();
+    if (!state.paused) autoRunTick();
+  }
+
+  function updatePauseButton() {
+    const btn = state.panel?.querySelector('#alta-home-features-pause');
+    if (!btn) return;
+    btn.textContent = state.paused ? 'Resume Auto' : 'Pause Auto';
+    btn.style.background = state.paused ? '#b45309' : '#2563eb';
+  }
+
+  function autoPageKey() {
+    return `${location.pathname}${location.search}|home-features`;
   }
 
   function captureHomeFeatureRow() {
@@ -262,7 +334,7 @@
     const panel = document.createElement('div');
     panel.id = 'alta-home-features-panel';
     panel.innerHTML = panelHtml(SCRIPT_NAME, VERSION, [
-      ['alta-home-features-run', 'Run Page'],
+      ['alta-home-features-pause', 'Pause Auto'],
       ['alta-home-features-fill', 'Fill Only'],
       ['alta-home-features-copy', 'Copy Logs']
     ]);
@@ -273,10 +345,14 @@
   }
 
   function bindPanel() {
-    state.panel.querySelector('#alta-home-features-run')?.addEventListener('click', () => runPage({ continueAfter: true }));
-    state.panel.querySelector('#alta-home-features-fill')?.addEventListener('click', () => runPage({ continueAfter: false }));
+    state.panel.querySelector('#alta-home-features-pause')?.addEventListener('click', togglePause);
+    state.panel.querySelector('#alta-home-features-fill')?.addEventListener('click', () => {
+      state.lastAutoKey = autoPageKey();
+      startRun({ continueAfter: false });
+    });
     state.panel.querySelector('#alta-home-features-copy')?.addEventListener('click', copyLogs);
     makeDraggable(state.panel, KEYS.panelPos);
+    updatePauseButton();
   }
 
   function panelCss(id) {

@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Alta Customer Info
 // @namespace    homebot.alta-customer-info
-// @version      0.1.6
-// @description  Manual Alta customer-info page runner. Sets today's policy start date, confirms default customer questions, acknowledges disclosures, and continues.
+// @version      0.1.7
+// @description  Auto-runs the Alta customer-info page. Sets today's policy start date, confirms default customer questions, acknowledges disclosures, and continues.
 // @author       OpenAI
 // @match        https://alta.farmers.com/*
 // @run-at       document-idle
@@ -19,15 +19,24 @@
   try { window.__ALTA_CUSTOMER_INFO_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'Alta Customer Info';
-  const VERSION = '0.1.6';
+  const VERSION = '0.1.7';
   const KEYS = {
     currentJob: 'tm_alta_current_job_v1',
     payload: 'tm_alta_home_quote_grab_payload_v1',
     panelPos: 'tm_alta_customer_info_panel_pos_v1',
     logs: 'tm_alta_customer_info_logs_v1'
   };
-  const CFG = { maxLogLines: 24, waitMs: 12000, pollMs: 200 };
-  const state = { panel: null, ui: {}, logs: [], destroyed: false };
+  const CFG = { maxLogLines: 24, waitMs: 12000, pollMs: 200, autoScanMs: 800 };
+  const state = {
+    panel: null,
+    ui: {},
+    logs: [],
+    destroyed: false,
+    paused: false,
+    running: false,
+    autoTimer: null,
+    lastAutoKey: ''
+  };
 
   init();
 
@@ -38,11 +47,13 @@
     loadLogs();
     log(`Loaded v${VERSION}`);
     updatePayload({}, { customerInfoLoaded: true });
+    startAutoRun();
     window.__ALTA_CUSTOMER_INFO_CLEANUP__ = cleanup;
   }
 
   function cleanup() {
     state.destroyed = true;
+    if (state.autoTimer) clearInterval(state.autoTimer);
     try { state.panel?.remove(); } catch {}
     try { delete window.__ALTA_CUSTOMER_INFO_CLEANUP__; } catch {}
   }
@@ -95,11 +106,71 @@
         log('Fill only complete');
       }
       setStatus('Done');
+      return true;
     } catch (err) {
       setStatus('Error');
       log(`Error during ${step}: ${err?.message || err}`);
       if (err?.stack) console.error(`[${SCRIPT_NAME}] Error during ${step}`, err);
+      return false;
     }
+  }
+
+  function startAutoRun() {
+    setStatus('Auto-run watching');
+    state.autoTimer = setInterval(autoRunTick, CFG.autoScanMs);
+    autoRunTick();
+  }
+
+  function autoRunTick() {
+    if (state.destroyed || state.running) return;
+    if (state.paused) {
+      setStatus('Paused for this tab');
+      return;
+    }
+    if (!isCustomerInfoReady()) {
+      state.lastAutoKey = '';
+      return;
+    }
+
+    const key = autoPageKey();
+    if (state.lastAutoKey === key) return;
+    state.lastAutoKey = key;
+    log('Auto-run triggered');
+    startRun({ continueAfter: true });
+  }
+
+  async function startRun(options) {
+    if (state.running) {
+      log('Run already in progress');
+      return false;
+    }
+    state.running = true;
+    updatePauseButton();
+    try {
+      return await runPage(options);
+    } finally {
+      state.running = false;
+      updatePauseButton();
+    }
+  }
+
+  function togglePause() {
+    state.paused = !state.paused;
+    log(state.paused ? 'Paused auto-run for this tab' : 'Auto-run resumed');
+    setStatus(state.paused ? 'Paused for this tab' : 'Auto-run watching');
+    updatePauseButton();
+    if (!state.paused) autoRunTick();
+  }
+
+  function updatePauseButton() {
+    const btn = state.panel?.querySelector('#alta-customer-info-pause');
+    if (!btn) return;
+    btn.textContent = state.paused ? 'Resume Auto' : 'Pause Auto';
+    btn.style.background = state.paused ? '#b45309' : '#2563eb';
+  }
+
+  function autoPageKey() {
+    return `${location.pathname}${location.search}|customer-info`;
   }
 
   async function clickContinue() {
@@ -278,7 +349,7 @@
     const panel = document.createElement('div');
     panel.id = 'alta-customer-info-panel';
     panel.innerHTML = panelHtml(SCRIPT_NAME, VERSION, [
-      ['alta-customer-info-run', 'Run Page'],
+      ['alta-customer-info-pause', 'Pause Auto'],
       ['alta-customer-info-fill', 'Fill Only'],
       ['alta-customer-info-copy', 'Copy Logs']
     ]);
@@ -289,10 +360,14 @@
   }
 
   function bindPanel() {
-    state.panel.querySelector('#alta-customer-info-run')?.addEventListener('click', () => runPage({ continueAfter: true }));
-    state.panel.querySelector('#alta-customer-info-fill')?.addEventListener('click', () => runPage({ continueAfter: false }));
+    state.panel.querySelector('#alta-customer-info-pause')?.addEventListener('click', togglePause);
+    state.panel.querySelector('#alta-customer-info-fill')?.addEventListener('click', () => {
+      state.lastAutoKey = autoPageKey();
+      startRun({ continueAfter: false });
+    });
     state.panel.querySelector('#alta-customer-info-copy')?.addEventListener('click', copyLogs);
     makeDraggable(state.panel, KEYS.panelPos);
+    updatePauseButton();
   }
 
   function panelCss(id) {
@@ -435,6 +510,11 @@
   function findByText(selector, text) {
     const wanted = normalize(text).toLowerCase();
     return [...document.querySelectorAll(selector)].find((el) => normalize(el.textContent).toLowerCase().includes(wanted));
+  }
+
+  function isCustomerInfoReady() {
+    return !!findByText('h1,.pageTitle,.tui-subtitle,h2', 'Customer information') ||
+      (location.pathname.includes('/quote/auto/personal-info') && !!document.querySelector('#policyStartDate'));
   }
 
   function waitFor(fn, timeoutMs = CFG.waitMs) {

@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Alta Replacement Cost
 // @namespace    homebot.alta-replacement-cost
-// @version      0.1.4
-// @description  Manual Alta replacement-cost page runner. Captures replacement cost and 360Value details, stores them in the Alta home payload, and continues.
+// @version      0.1.5
+// @description  Auto-runs the Alta replacement-cost page. Captures replacement cost and 360Value details, stores them in the Alta home payload, and continues.
 // @author       OpenAI
 // @match        https://alta.farmers.com/*
 // @run-at       document-idle
@@ -19,15 +19,24 @@
   try { window.__ALTA_REPLACEMENT_COST_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'Alta Replacement Cost';
-  const VERSION = '0.1.4';
+  const VERSION = '0.1.5';
   const KEYS = {
     currentJob: 'tm_alta_current_job_v1',
     payload: 'tm_alta_home_quote_grab_payload_v1',
     panelPos: 'tm_alta_replacement_cost_panel_pos_v1',
     logs: 'tm_alta_replacement_cost_logs_v1'
   };
-  const CFG = { maxLogLines: 24, waitMs: 12000, pollMs: 200 };
-  const state = { panel: null, ui: {}, logs: [] };
+  const CFG = { maxLogLines: 24, waitMs: 12000, pollMs: 200, autoScanMs: 800 };
+  const state = {
+    panel: null,
+    ui: {},
+    logs: [],
+    destroyed: false,
+    paused: false,
+    running: false,
+    autoTimer: null,
+    lastAutoKey: ''
+  };
 
   init();
 
@@ -37,10 +46,13 @@
     restorePanelPos();
     loadLogs();
     log(`Loaded v${VERSION}`);
+    startAutoRun();
     window.__ALTA_REPLACEMENT_COST_CLEANUP__ = cleanup;
   }
 
   function cleanup() {
+    state.destroyed = true;
+    if (state.autoTimer) clearInterval(state.autoTimer);
     try { state.panel?.remove(); } catch {}
     try { delete window.__ALTA_REPLACEMENT_COST_CLEANUP__; } catch {}
   }
@@ -79,10 +91,70 @@
         log('Capture only complete');
       }
       setStatus('Done');
+      return true;
     } catch (err) {
       setStatus('Error');
       log(`Error: ${err?.message || err}`);
+      return false;
     }
+  }
+
+  function startAutoRun() {
+    setStatus('Auto-run watching');
+    state.autoTimer = setInterval(autoRunTick, CFG.autoScanMs);
+    autoRunTick();
+  }
+
+  function autoRunTick() {
+    if (state.destroyed || state.running) return;
+    if (state.paused) {
+      setStatus('Paused for this tab');
+      return;
+    }
+    if (!isReplacementCostReady()) {
+      state.lastAutoKey = '';
+      return;
+    }
+
+    const key = autoPageKey();
+    if (state.lastAutoKey === key) return;
+    state.lastAutoKey = key;
+    log('Auto-run triggered');
+    startRun({ continueAfter: true });
+  }
+
+  async function startRun(options) {
+    if (state.running) {
+      log('Run already in progress');
+      return false;
+    }
+    state.running = true;
+    updatePauseButton();
+    try {
+      return await runPage(options);
+    } finally {
+      state.running = false;
+      updatePauseButton();
+    }
+  }
+
+  function togglePause() {
+    state.paused = !state.paused;
+    log(state.paused ? 'Paused auto-run for this tab' : 'Auto-run resumed');
+    setStatus(state.paused ? 'Paused for this tab' : 'Auto-run watching');
+    updatePauseButton();
+    if (!state.paused) autoRunTick();
+  }
+
+  function updatePauseButton() {
+    const btn = state.panel?.querySelector('#alta-replacement-cost-pause');
+    if (!btn) return;
+    btn.textContent = state.paused ? 'Resume Auto' : 'Pause Auto';
+    btn.style.background = state.paused ? '#b45309' : '#2563eb';
+  }
+
+  function autoPageKey() {
+    return `${location.pathname}${location.search}|replacement-cost`;
   }
 
   function capture360Value() {
@@ -201,7 +273,7 @@
     const panel = document.createElement('div');
     panel.id = 'alta-replacement-cost-panel';
     panel.innerHTML = panelHtml(SCRIPT_NAME, VERSION, [
-      ['alta-replacement-cost-run', 'Run Page'],
+      ['alta-replacement-cost-pause', 'Pause Auto'],
       ['alta-replacement-cost-capture', 'Capture Only'],
       ['alta-replacement-cost-copy', 'Copy Logs']
     ]);
@@ -212,10 +284,14 @@
   }
 
   function bindPanel() {
-    state.panel.querySelector('#alta-replacement-cost-run')?.addEventListener('click', () => runPage({ continueAfter: true }));
-    state.panel.querySelector('#alta-replacement-cost-capture')?.addEventListener('click', () => runPage({ continueAfter: false }));
+    state.panel.querySelector('#alta-replacement-cost-pause')?.addEventListener('click', togglePause);
+    state.panel.querySelector('#alta-replacement-cost-capture')?.addEventListener('click', () => {
+      state.lastAutoKey = autoPageKey();
+      startRun({ continueAfter: false });
+    });
     state.panel.querySelector('#alta-replacement-cost-copy')?.addEventListener('click', copyLogs);
     makeDraggable(state.panel, KEYS.panelPos);
+    updatePauseButton();
   }
 
   function panelCss(id) {

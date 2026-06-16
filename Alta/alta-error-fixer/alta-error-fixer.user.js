@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Alta Error Fixer
 // @namespace    homebot.alta-error-fixer
-// @version      0.1.0
+// @version      0.1.1
 // @description  Watches Alta knockout dialogs and applies known Home quote fixes.
 // @author       OpenAI
 // @match        https://alta.farmers.com/*
@@ -19,16 +19,19 @@
   try { window.__ALTA_ERROR_FIXER_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'Alta Error Fixer';
-  const VERSION = '0.1.0';
+  const VERSION = '0.1.1';
   const KEYS = {
     panelPos: 'tm_alta_error_fixer_panel_pos_v1',
-    logs: 'tm_alta_error_fixer_logs_v1'
+    logs: 'tm_alta_error_fixer_logs_v1',
+    flowLock: 'tm_alta_error_fixer_flow_lock_v1'
   };
   const CFG = {
     maxLogLines: 30,
     scanMs: 900,
     pollMs: 200,
     waitMs: 12000,
+    navWaitMs: 18000,
+    flowLockMs: 5 * 60 * 1000,
     optionWaitMs: 4000,
     recalcWaitMs: 5000
   };
@@ -55,6 +58,18 @@
           text.includes('change roof valuation method to actual cash value');
       },
       fix: fixRoofValuationActualCashValue
+    },
+    {
+      id: 'water-leak-auto-shutoff',
+      label: 'Whole house water detection with automatic shutoff',
+      matches(dialog) {
+        const text = normalize(dialog.textContent).toLowerCase();
+        return text.includes('ineligible for farmers home') &&
+          text.includes('whole house water leak detection device') &&
+          text.includes('automatic shut') &&
+          text.includes('required for this home');
+      },
+      fix: fixWholeHouseWaterDetection
     }
   ];
 
@@ -143,7 +158,7 @@
     await sleep(750);
 
     const select = await waitFor(() => findRoofValuationSelect(), CFG.waitMs);
-    await setMatSelectValue(select, 'Actual Cash Value', 'Roof valuation');
+    await setMatSelectValue(select, 'Actual Cash Value', 'Roof valuation', findRoofValuationSelect);
 
     const recalc = await waitFor(() => findRecalculateButton(), CFG.recalcWaitMs).catch(() => null);
     if (recalc) {
@@ -155,9 +170,41 @@
     }
   }
 
-  async function setMatSelectValue(select, wantedText, label) {
-    const wanted = normalize(wantedText).toLowerCase();
-    if (normalize(select.textContent).toLowerCase().includes(wanted)) {
+  async function fixWholeHouseWaterDetection(dialog) {
+    setFlowLock('water-leak-auto-shutoff');
+    let fixed = false;
+    try {
+      const goBack = actionByText('Go back and edit', dialog) || actionByText('Go back and edit');
+      if (!goBack) throw new Error('Go back and edit action not found');
+
+      clickElement(goBack);
+      log('Clicked Go back and edit');
+      await waitFor(() => !findKnockoutDialog(), 8000).catch(() => null);
+      await sleep(750);
+
+      await goToSideNavStep('Home features');
+      await waitForPageReady(() => isHomeFeaturesWaterFixReady(), 'Home features');
+
+      const waterSelect = await waitFor(() => findMatSelectByFormControl('fortifiedHomeCertification'), CFG.waitMs);
+      await setMatSelectValue(waterSelect, 'Whole house water detection', 'FORTIFIED Home certification', () => findMatSelectByFormControl('fortifiedHomeCertification'));
+
+      await waitForPageReady(() => !!findRadioGroupByFormControl('automaticWaterShutOff'), 'Automatic water shut off');
+      await clickRadioByFormControl('automaticWaterShutOff', 'yes', 'Automatic water shut off');
+
+      await clickContinueButton('Home features');
+      await waitForPageReady(() => isReplacementCostReady(), 'Replacement cost');
+      await clickContinueButton('Replacement cost');
+      await waitForPageReady(() => isHomeCoverageReady(), 'Home coverage');
+      if (!await triggerHomeCoverageRun()) throw new Error('Home Coverage run button not found');
+      fixed = true;
+    } finally {
+      if (fixed) clearFlowLock();
+      else setFlowLock('water-leak-auto-shutoff-incomplete');
+    }
+  }
+
+  async function setMatSelectValue(select, wantedText, label, findCurrent = () => select) {
+    if (textMatches(select.textContent, wantedText)) {
       log(`${label} already ${wantedText}`);
       return true;
     }
@@ -170,8 +217,8 @@
     clickElement(option);
     await sleep(600);
 
-    const refreshed = findRoofValuationSelect() || select;
-    if (!normalize(refreshed.textContent).toLowerCase().includes(wanted)) {
+    const refreshed = findCurrent() || select;
+    if (!textMatches(refreshed.textContent, wantedText)) {
       throw new Error(`${label} did not change to ${wantedText}`);
     }
 
@@ -195,10 +242,152 @@
       selects.find((select) => normalize(select.closest('.input-main-section, [class*="input-main-section"], [class*="coverage"]')?.textContent).toLowerCase().includes('roof valuation'));
   }
 
+  function findMatSelectByFormControl(name) {
+    return document.querySelector(`mat-select[formcontrolname="${cssAttr(name)}"]`);
+  }
+
   function findOption(text) {
-    const wanted = normalize(text).toLowerCase();
     return [...document.querySelectorAll('mat-option,[role="option"]')]
-      .find((option) => normalize(option.textContent).toLowerCase().includes(wanted));
+      .find((option) => textMatches(option.textContent, text));
+  }
+
+  async function goToSideNavStep(label) {
+    const step = await waitFor(() => findSideNavStep(label), CFG.navWaitMs);
+    clickElement(step);
+    log(`Clicked side nav: ${label}`);
+    await sleep(750);
+  }
+
+  function findSideNavStep(label) {
+    const wanted = normalize(label).toLowerCase();
+    return [...document.querySelectorAll('.sidenav-step, [data-test-id^="SIDE_NAV_STEP"], a')]
+      .find((el) => isVisible(el) &&
+        el.getAttribute('aria-disabled') !== 'true' &&
+        normalize(el.textContent).toLowerCase().includes(wanted));
+  }
+
+  function isHomeFeaturesWaterFixReady() {
+    return !!findMatSelectByFormControl('fortifiedHomeCertification') &&
+      !!findContinueButton() &&
+      (!document.querySelector('.sidenav-current-step') || isCurrentSideNavStep('Home features'));
+  }
+
+  function isReplacementCostReady() {
+    return !!(document.querySelector('[data-test-id="Currency"]') || findByText('h2,div', 'Primary home characteristics')) &&
+      !!findContinueButton() &&
+      (!document.querySelector('.sidenav-current-step') || isCurrentSideNavStep('Est replacement cost'));
+  }
+
+  function isHomeCoverageReady() {
+    const pageMarker = document.querySelector('mat-select[formfieldmodifiedsegmentreporter="coverage_template"]') ||
+      document.querySelector('#quoteCardCoverageCard') ||
+      findByText('h1,h2,.pageTitle,.tui-subtitle', 'Home coverage');
+    return !!pageMarker &&
+      (!document.querySelector('.sidenav-current-step') || isCurrentSideNavStep('Home coverage'));
+  }
+
+  function isCurrentSideNavStep(label) {
+    const wanted = normalize(label).toLowerCase();
+    return [...document.querySelectorAll('.sidenav-current-step')]
+      .some((el) => normalize(el.textContent).toLowerCase().includes(wanted));
+  }
+
+  async function waitForPageReady(readyFn, label) {
+    await waitFor(readyFn, CFG.navWaitMs);
+    const start = Date.now();
+    let lastSignature = '';
+    let stableSince = 0;
+
+    while (Date.now() - start < CFG.navWaitMs) {
+      if (!readyFn() || isPageBusy()) {
+        lastSignature = '';
+        stableSince = 0;
+        await sleep(CFG.pollMs);
+        continue;
+      }
+
+      const signature = pageLoadSignature();
+      if (signature === lastSignature) {
+        if (Date.now() - stableSince >= 1000) {
+          log(`${label} loaded`);
+          return true;
+        }
+      } else {
+        lastSignature = signature;
+        stableSince = Date.now();
+      }
+      await sleep(CFG.pollMs);
+    }
+
+    throw new Error(`${label} did not finish loading`);
+  }
+
+  function pageLoadSignature() {
+    const controls = [...document.querySelectorAll('input,textarea,select,mat-select,mat-radio-group,mat-checkbox,button,[data-test-id^="Property_Name "]')]
+      .filter((el) => !state.panel?.contains(el));
+    const controlState = controls.map((el) => [
+      el.tagName,
+      el.id || el.getAttribute('data-test-id') || el.getAttribute('formcontrolname') || el.getAttribute('aria-label') || '',
+      'value' in el ? el.value : normalize(el.textContent).slice(0, 40),
+      'checked' in el ? String(el.checked) : ''
+    ].join(':')).join('|');
+    return `${document.readyState}|${controls.length}|${controlState}`;
+  }
+
+  function isPageBusy() {
+    return [...document.querySelectorAll('mat-spinner,mat-progress-spinner,.mat-mdc-progress-spinner,.mat-progress-spinner,.spinner,[aria-busy="true"]')]
+      .some((el) => !state.panel?.contains(el) && isVisible(el));
+  }
+
+  async function clickRadioByFormControl(name, value, label) {
+    const group = await waitFor(() => findRadioGroupByFormControl(name), CFG.waitMs);
+    const input = group.querySelector(`input[type="radio"][value="${cssAttr(value)}"]`);
+    if (!input) throw new Error(`Radio value not found: ${label} = ${value}`);
+    if (input.checked) {
+      log(`${label} already ${value}`);
+      return true;
+    }
+
+    const radio = input.closest('mat-radio-button') || input;
+    const target = input.id
+      ? radio.querySelector(`label[for="${cssAttr(input.id)}"]`) || radio.querySelector('.mat-mdc-radio-touch-target, .mdc-radio') || radio
+      : radio;
+    clickElement(target);
+    await sleep(400);
+    if (!input.checked) {
+      clickElement(input);
+      await sleep(300);
+    }
+    if (!input.checked) throw new Error(`${label} did not switch to ${value}`);
+    log(`Radio set: ${label} = ${value}`);
+    return true;
+  }
+
+  function findRadioGroupByFormControl(name) {
+    return document.querySelector(`mat-radio-group[formcontrolname="${cssAttr(name)}"]`);
+  }
+
+  async function clickContinueButton(label) {
+    const btn = await waitFor(() => findContinueButton(), CFG.waitMs);
+    clickElement(btn);
+    log(`Clicked Continue on ${label}`);
+    await sleep(900);
+  }
+
+  function findContinueButton() {
+    return document.querySelector('button[data-test-id="CONTINUE_BUTTON"], button[data-test-id="Continue_Button"]') ||
+      [...document.querySelectorAll('button')].find((btn) => isVisible(btn) && !isDisabled(btn) && /^continue$/i.test(normalize(btn.textContent)));
+  }
+
+  async function triggerHomeCoverageRun() {
+    const runButton = await waitFor(() => document.querySelector('#alta-home-coverage-run'), CFG.waitMs).catch(() => null);
+    if (!runButton) {
+      log('Home Coverage run button not found; fix complete but coverage was not rerun');
+      return false;
+    }
+    clickElement(runButton);
+    log('Triggered Home Coverage run after fix');
+    return true;
   }
 
   function findRecalculateButton() {
@@ -214,6 +403,11 @@
     const wanted = normalize(text).toLowerCase();
     return [...root.querySelectorAll('a,button,[role="button"]')]
       .find((el) => normalize(el.textContent).toLowerCase() === wanted);
+  }
+
+  function findByText(selector, text) {
+    const wanted = normalize(text).toLowerCase();
+    return [...document.querySelectorAll(selector)].find((el) => normalize(el.textContent).toLowerCase().includes(wanted));
   }
 
   function logUnknownKnockout(dialog) {
@@ -317,6 +511,21 @@
     try { localStorage.setItem(key, JSON.stringify(value, null, 2)); } catch {}
   }
 
+  function setFlowLock(reason) {
+    writeJson(KEYS.flowLock, {
+      active: true,
+      reason,
+      source: SCRIPT_NAME,
+      version: VERSION,
+      expiresAt: Date.now() + CFG.flowLockMs,
+      updatedAt: new Date().toISOString()
+    });
+  }
+
+  function clearFlowLock() {
+    try { localStorage.removeItem(KEYS.flowLock); } catch {}
+  }
+
   function waitFor(fn, timeoutMs = CFG.waitMs) {
     const start = Date.now();
     return new Promise((resolve, reject) => {
@@ -365,6 +574,19 @@
 
   function normalize(value) {
     return String(value == null ? '' : value).replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+
+  function textMatches(actual, expected) {
+    const haystack = normalize(actual).toLowerCase();
+    const needle = normalize(expected).toLowerCase();
+    if (!needle) return true;
+    if (haystack.includes(needle)) return true;
+    const words = needle.split(/\s+/).filter((word) => word.length > 1);
+    return words.length > 0 && words.every((word) => haystack.includes(word));
+  }
+
+  function cssAttr(value) {
+    return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   }
 
   function escapeHtml(value) {

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Alta Replacement Cost
 // @namespace    homebot.alta-replacement-cost
-// @version      0.1.6
+// @version      0.1.7
 // @description  Auto-runs the Alta replacement-cost page. Captures replacement cost and 360Value details, stores them in the Alta home payload, and continues.
 // @author       OpenAI
 // @match        https://alta.farmers.com/*
@@ -19,12 +19,13 @@
   try { window.__ALTA_REPLACEMENT_COST_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'Alta Replacement Cost';
-  const VERSION = '0.1.6';
+  const VERSION = '0.1.7';
   const KEYS = {
     currentJob: 'tm_alta_current_job_v1',
     payload: 'tm_alta_home_quote_grab_payload_v1',
     panelPos: 'tm_alta_replacement_cost_panel_pos_v1',
-    logs: 'tm_alta_replacement_cost_logs_v1'
+    logs: 'tm_alta_replacement_cost_logs_v1',
+    errorFixerLock: 'tm_alta_error_fixer_flow_lock_v1'
   };
   const CFG = { maxLogLines: 24, waitMs: 12000, loadWaitMs: 25000, settleMs: 1600, pollMs: 200, autoScanMs: 800 };
   const state = {
@@ -109,6 +110,11 @@
     if (state.destroyed || state.running) return;
     if (state.paused) {
       setStatus('Paused for this tab');
+      return;
+    }
+    if (isErrorFixerFlowActive()) {
+      state.lastAutoKey = '';
+      setStatus('Error fixer active');
       return;
     }
     if (!isReplacementCostReady()) {
@@ -359,6 +365,14 @@
       const raw = localStorage.getItem(key);
       return raw ? JSON.parse(raw) : null;
     } catch { return null; }
+  }
+
+  function isErrorFixerFlowActive() {
+    const lock = readJson(KEYS.errorFixerLock);
+    if (!lock?.active) return false;
+    if (Number(lock.expiresAt || 0) > Date.now()) return true;
+    try { localStorage.removeItem(KEYS.errorFixerLock); } catch {}
+    return false;
   }
 
   function writeJson(key, value) {

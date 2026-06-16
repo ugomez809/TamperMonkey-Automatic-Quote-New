@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Alta Home Features
 // @namespace    homebot.alta-home-features
-// @version      0.1.5
+// @version      0.1.6
 // @description  Auto-runs the Alta home-features page. Applies Alta safe defaults, leaves water leak protection untouched, and continues.
 // @author       OpenAI
 // @match        https://alta.farmers.com/*
@@ -19,7 +19,7 @@
   try { window.__ALTA_HOME_FEATURES_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'Alta Home Features';
-  const VERSION = '0.1.5';
+  const VERSION = '0.1.6';
   const KEYS = {
     currentJob: 'tm_alta_current_job_v1',
     payload: 'tm_alta_home_quote_grab_payload_v1',
@@ -226,14 +226,30 @@
       log(`Skipped missing checkbox: ${label}`);
       return false;
     }
-    if (input.checked) {
-      (input.closest('mat-checkbox') || input).click();
-      await sleep(150);
-      log(`${label} unchecked`);
-    } else {
+    if (!isCheckboxChecked(input)) {
       log(`${label} already unchecked`);
+      return true;
     }
-    return true;
+
+    for (const target of checkboxClickTargets(input)) {
+      clickElement(target);
+      await sleep(300);
+      if (!isCheckboxChecked(document.querySelector(selector) || input)) {
+        log(`${label} unchecked`);
+        return true;
+      }
+    }
+
+    const freshInput = document.querySelector(selector) || input;
+    setNativeChecked(freshInput, false);
+    dispatchInputEvents(freshInput);
+    await sleep(300);
+    if (!isCheckboxChecked(document.querySelector(selector) || freshInput)) {
+      log(`${label} unchecked`);
+      return true;
+    }
+
+    throw new Error(`${label} stayed checked after uncheck attempts`);
   }
 
   async function clickContinue() {
@@ -426,6 +442,62 @@
     try { localStorage.setItem(key, JSON.stringify(value, null, 2)); } catch {}
   }
 
+  function clickElement(el) {
+    if (!el) return false;
+    try {
+      el.click();
+      return true;
+    } catch {}
+
+    const win = el.ownerDocument?.defaultView || window;
+    const MouseEventCtor = win.MouseEvent || MouseEvent;
+    return el.dispatchEvent(new MouseEventCtor('click', { bubbles: true, cancelable: true, composed: true }));
+  }
+
+  function checkboxClickTargets(input) {
+    const root = input.closest('mat-checkbox, mat-mdc-checkbox, .mat-mdc-checkbox, .mat-checkbox, .mdc-form-field') || input.parentElement || input;
+    const targets = [];
+    if (input.id) {
+      targets.push(document.querySelector(`label[for="${cssAttr(input.id)}"]`));
+      targets.push(root.querySelector?.(`label[for="${cssAttr(input.id)}"]`));
+    }
+    targets.push(
+      root.querySelector?.('.mat-mdc-checkbox-touch-target'),
+      root.querySelector?.('.mdc-checkbox'),
+      root.querySelector?.('.mat-checkbox-inner-container'),
+      root.querySelector?.('label'),
+      root,
+      input
+    );
+    return [...new Set(targets.filter(Boolean))];
+  }
+
+  function isCheckboxChecked(input) {
+    if (!input) return false;
+    if ('checked' in input) return !!input.checked;
+    const aria = input.getAttribute?.('aria-checked');
+    return /^true$/i.test(String(aria || ''));
+  }
+
+  function setNativeChecked(el, value) {
+    const win = el?.ownerDocument?.defaultView || window;
+    const setter = Object.getOwnPropertyDescriptor(win.HTMLInputElement?.prototype || {}, 'checked')?.set;
+    if (setter) {
+      try {
+        setter.call(el, value);
+        return;
+      } catch {}
+    }
+    try { el.checked = value; } catch {}
+  }
+
+  function dispatchInputEvents(el) {
+    const win = el?.ownerDocument?.defaultView || window;
+    const EventCtor = win.Event || Event;
+    el.dispatchEvent(new EventCtor('input', { bubbles: true, composed: true }));
+    el.dispatchEvent(new EventCtor('change', { bubbles: true, composed: true }));
+  }
+
   function buttonByText(text) {
     const wanted = normalize(text).toLowerCase();
     return [...document.querySelectorAll('button')].find((btn) => normalize(btn.textContent).toLowerCase() === wanted);
@@ -492,5 +564,9 @@
   function cssEscape(value) {
     if (window.CSS?.escape) return CSS.escape(value);
     return String(value).replace(/"/g, '\\"');
+  }
+
+  function cssAttr(value) {
+    return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   }
 })();

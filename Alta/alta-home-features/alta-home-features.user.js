@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Alta Home Features
 // @namespace    homebot.alta-home-features
-// @version      0.1.8
+// @version      0.1.9
 // @description  Auto-runs the Alta home-features page. Applies Alta safe defaults, leaves water leak protection untouched, and continues.
 // @author       OpenAI
 // @match        https://alta.farmers.com/*
@@ -19,7 +19,7 @@
   try { window.__ALTA_HOME_FEATURES_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'Alta Home Features';
-  const VERSION = '0.1.8';
+  const VERSION = '0.1.9';
   const KEYS = {
     currentJob: 'tm_alta_current_job_v1',
     payload: 'tm_alta_home_quote_grab_payload_v1',
@@ -232,27 +232,18 @@
       log(`Skipped missing checkbox: ${label}`);
       return false;
     }
-    if (!isCheckboxChecked(input)) {
+    if (!isCheckboxChecked(input, label)) {
       log(`${label} already unchecked`);
       return true;
     }
 
-    for (const target of checkboxClickTargets(input)) {
+    for (const target of checkboxClickTargets(input, label)) {
       clickElement(target);
-      await sleep(300);
-      if (!isCheckboxChecked(document.querySelector(selector) || input)) {
+      await sleep(450);
+      if (!isCheckboxChecked(document.querySelector(selector) || input, label)) {
         log(`${label} unchecked`);
         return true;
       }
-    }
-
-    const freshInput = document.querySelector(selector) || input;
-    setNativeChecked(freshInput, false);
-    dispatchInputEvents(freshInput);
-    await sleep(300);
-    if (!isCheckboxChecked(document.querySelector(selector) || freshInput)) {
-      log(`${label} unchecked`);
-      return true;
     }
 
     throw new Error(`${label} stayed checked after uncheck attempts`);
@@ -468,8 +459,8 @@
     return el.dispatchEvent(new MouseEventCtor('click', { bubbles: true, cancelable: true, composed: true }));
   }
 
-  function checkboxClickTargets(input) {
-    const root = input.closest('mat-checkbox, mat-mdc-checkbox, .mat-mdc-checkbox, .mat-checkbox, .mdc-form-field') || input.parentElement || input;
+  function checkboxClickTargets(input, label) {
+    const root = findCheckboxRoot(input, label);
     const targets = [];
     if (input.id) {
       targets.push(document.querySelector(`label[for="${cssAttr(input.id)}"]`));
@@ -483,33 +474,37 @@
       root,
       input
     );
-    return [...new Set(targets.filter(Boolean))];
+    return [...new Set(targets.filter(Boolean))].concat([...new Set(targets.filter(Boolean))]);
   }
 
-  function isCheckboxChecked(input) {
+  function isCheckboxChecked(input, label) {
     if (!input) return false;
+    const root = findCheckboxRoot(input, label);
+    const positiveSelector = [
+      '.mat-mdc-checkbox-checked',
+      '.mat-checkbox-checked',
+      '.mdc-checkbox--selected',
+      '[aria-checked="true"]',
+      'input[type="checkbox"]:checked'
+    ].join(',');
+    if (root?.matches?.(positiveSelector) || root?.querySelector?.(positiveSelector)) return true;
     if ('checked' in input) return !!input.checked;
     const aria = input.getAttribute?.('aria-checked');
     return /^true$/i.test(String(aria || ''));
   }
 
-  function setNativeChecked(el, value) {
-    const win = el?.ownerDocument?.defaultView || window;
-    const setter = Object.getOwnPropertyDescriptor(win.HTMLInputElement?.prototype || {}, 'checked')?.set;
-    if (setter) {
-      try {
-        setter.call(el, value);
-        return;
-      } catch {}
-    }
-    try { el.checked = value; } catch {}
-  }
+  function findCheckboxRoot(input, label) {
+    const direct = input?.closest?.('mat-checkbox, mat-mdc-checkbox, .mat-mdc-checkbox, .mat-checkbox, .mdc-form-field');
+    if (direct) return direct;
+    const inputContainer = input?.closest?.('[class*="checkbox"], label, li') || input?.parentElement;
+    if (inputContainer && inputContainer !== document.body) return inputContainer;
 
-  function dispatchInputEvents(el) {
-    const win = el?.ownerDocument?.defaultView || window;
-    const EventCtor = win.Event || Event;
-    el.dispatchEvent(new EventCtor('input', { bubbles: true, composed: true }));
-    el.dispatchEvent(new EventCtor('change', { bubbles: true, composed: true }));
+    const wanted = normalize(label).toLowerCase();
+    const labelEl = [...document.querySelectorAll('label,p,span,div')]
+      .filter((el) => normalize(el.textContent).toLowerCase().includes(wanted))
+      .sort((a, b) => normalize(a.textContent).length - normalize(b.textContent).length)[0];
+    return labelEl?.closest?.('mat-checkbox, mat-mdc-checkbox, .mat-mdc-checkbox, .mat-checkbox, .mdc-form-field, .row, [class*="row"]') ||
+      input;
   }
 
   function buttonByText(text) {

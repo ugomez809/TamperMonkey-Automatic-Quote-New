@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Alta Home Coverage
 // @namespace    homebot.alta-home-coverage
-// @version      0.1.8
+// @version      0.1.9
 // @description  Manual Alta home-coverage page runner. Sets All Perils to 5000, Split Water to 5 percent, captures pricing, and publishes the Alta home payload.
 // @author       OpenAI
 // @match        https://alta.farmers.com/*
@@ -19,7 +19,7 @@
   try { window.__ALTA_HOME_COVERAGE_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'Alta Home Coverage';
-  const VERSION = '0.1.8';
+  const VERSION = '0.1.9';
   const KEYS = {
     currentJob: 'tm_alta_current_job_v1',
     payload: 'tm_alta_home_quote_grab_payload_v1',
@@ -155,6 +155,8 @@
     const amountsByTemplate = {};
     let autoDiscountSeen = false;
 
+    await clearInitialHomeAutoDiscount();
+
     for (const scenario of scenarios) {
       const run = {
         field: scenario.field,
@@ -195,6 +197,11 @@
     }
 
     return { rowUpdates, runs, lastPrice, autoDiscountSeen };
+  }
+
+  async function clearInitialHomeAutoDiscount() {
+    log('Preflight: checking Home/Auto discount before first recalculation');
+    await setHomeAutoDiscount(false, true);
   }
 
   async function applyCoverageDefaults() {
@@ -268,15 +275,15 @@
       log(`Home/Auto discount already ${enabled ? 'on' : 'off'}`);
       return true;
     }
-    if (current == null && !enabled) {
-      log('Home/Auto discount state unknown; assuming off');
+    if (current == null && !enabled && !isToggleLikelyChecked(control)) {
+      log('Home/Auto discount state unknown; no checked marker found, treating as off');
       return true;
     }
 
     clickElement(findClickableToggle(control));
     await sleep(500);
     const after = getToggleState(control);
-    if (after === enabled || after == null) {
+    if (after === enabled || (after == null && !enabled && !isToggleLikelyChecked(control))) {
       log(`Home/Auto discount set ${enabled ? 'on' : 'off'}`);
       return true;
     }
@@ -303,9 +310,25 @@
     const aria = control.getAttribute('aria-checked') || control.querySelector('[aria-checked]')?.getAttribute('aria-checked');
     if (/^(true|false)$/i.test(String(aria || ''))) return /^true$/i.test(aria);
 
-    const classes = `${control.className || ''} ${control.querySelector('[class*="checked"], [class*="selected"], [class*="active"]')?.className || ''}`;
-    if (/\b(mat-mdc-checkbox-checked|mat-checkbox-checked|checked|selected|active)\b/i.test(classes)) return true;
+    if (isToggleLikelyChecked(control)) return true;
     return null;
+  }
+
+  function isToggleLikelyChecked(control) {
+    if (!control) return false;
+    const checkedSelector = [
+      '.mat-mdc-checkbox-checked',
+      '.mat-checkbox-checked',
+      '.mdc-checkbox--selected',
+      '[aria-checked="true"]',
+      'input[type="checkbox"]:checked',
+      'input[type="radio"]:checked'
+    ].join(',');
+    if (control.matches?.(checkedSelector) || control.querySelector?.(checkedSelector)) return true;
+
+    const clickable = findClickableToggle(control);
+    const classes = `${control.className || ''} ${clickable?.className || ''}`;
+    return /\b(mat-mdc-checkbox-checked|mat-checkbox-checked|mdc-checkbox--selected)\b/i.test(classes);
   }
 
   function capturePrice() {

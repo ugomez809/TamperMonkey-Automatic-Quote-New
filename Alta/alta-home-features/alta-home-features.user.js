@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Alta Home Features
 // @namespace    homebot.alta-home-features
-// @version      0.1.9
+// @version      0.1.11
 // @description  Auto-runs the Alta home-features page. Applies Alta safe defaults, leaves water leak protection untouched, and continues.
 // @author       OpenAI
 // @match        https://alta.farmers.com/*
@@ -19,7 +19,7 @@
   try { window.__ALTA_HOME_FEATURES_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'Alta Home Features';
-  const VERSION = '0.1.9';
+  const VERSION = '0.1.11';
   const KEYS = {
     currentJob: 'tm_alta_current_job_v1',
     payload: 'tm_alta_home_quote_grab_payload_v1',
@@ -27,7 +27,7 @@
     logs: 'tm_alta_home_features_logs_v1',
     errorFixerLock: 'tm_alta_error_fixer_flow_lock_v1'
   };
-  const CFG = { maxLogLines: 26, waitMs: 12000, loadWaitMs: 25000, settleMs: 1600, pollMs: 200, autoScanMs: 800 };
+  const CFG = { maxLogLines: 26, waitMs: 12000, loadWaitMs: 25000, settleMs: 1600, pollMs: 200, autoScanMs: 800, initialRunDelayMs: 10000, runPasses: 2 };
   const state = {
     panel: null,
     ui: {},
@@ -61,23 +61,17 @@
   async function runPage({ continueAfter = true } = {}) {
     try {
       setStatus('Running home features');
-      await waitForPageReady(() => isHomeFeaturesReady(), 'Home features page');
+      await waitForPageReady(() => isHomeFeaturesPage(), 'Home features page');
+      log('Waiting 10 seconds before first pass');
+      setStatus('Waiting 10 seconds before Home features run');
+      await sleep(CFG.initialRunDelayMs);
 
-      await setMatSelectByFormControl('firmAlarm', 'No device', false);
-      await setMatSelectByFormControl('burglarAlarm', 'No device', false);
-      log('Water leak protection intentionally left untouched');
-      await setMatSelectByFormControl('fortifiedHomeCertification', 'Not certified', false);
-      await setMatSelectByFormControl('plumbing', 'Copper', false);
-
-      await clickRadioByFormControl('locatedWildFireCommunityInd', 'no', false);
-      await clickRadioByFormControl('propertyLevelInd', 'no', false);
-      await clickRadioByFormControl('construction', 'no', false);
-      await clickRadioByFormControl('unrepairedStructuralDamage', 'no', false);
-      await clickRadioByFormControl('plumbingReplacedLast20Years', 'no', false);
-      await clickRadioByFormControl('solarPanelPresent', 'no', false);
-
-      await ensureUnchecked('#trampolinecheckbox-input', 'Trampoline');
-      await ensureUnchecked('#poolcheckbox-input', 'Pool');
+      for (let pass = 1; pass <= CFG.runPasses; pass += 1) {
+        setStatus(`Running home features pass ${pass}/${CFG.runPasses}`);
+        await waitForPageReady(() => isHomeFeaturesPage(), 'Home features page');
+        log(`Home features pass ${pass}/${CFG.runPasses}`);
+        await fillHomeFeatures();
+      }
 
       const rowUpdates = captureHomeFeatureRow();
       updatePayload(rowUpdates, { homeFeaturesComplete: true });
@@ -97,6 +91,24 @@
     }
   }
 
+  async function fillHomeFeatures() {
+    await setMatSelectByFormControl('firmAlarm', 'No device', false);
+    await setMatSelectByFormControl('burglarAlarm', 'No device', false);
+    log('Water leak protection intentionally left untouched');
+    await setMatSelectByFormControl('fortifiedHomeCertification', 'Not certified', false);
+    await setMatSelectByFormControl('plumbing', 'Copper', false);
+
+    await clickRadioByFormControl('locatedWildFireCommunityInd', 'no', false);
+    await clickRadioByFormControl('propertyLevelInd', 'no', false);
+    await clickRadioByFormControl('construction', 'no', false);
+    await clickRadioByFormControl('unrepairedStructuralDamage', 'no', false);
+    await clickRadioByFormControl('plumbingReplacedLast20Years', 'no', false);
+    await clickRadioByFormControl('solarPanelPresent', 'no', false);
+
+    await ensureUnchecked('#trampolinecheckbox-input', 'Trampoline');
+    await ensureUnchecked('#poolcheckbox-input', 'Pool');
+  }
+
   function startAutoRun() {
     setStatus('Auto-run watching');
     state.autoTimer = setInterval(autoRunTick, CFG.autoScanMs);
@@ -114,7 +126,7 @@
       setStatus('Error fixer active');
       return;
     }
-    if (!isHomeFeaturesReady()) {
+    if (!isHomeFeaturesPage()) {
       state.lastAutoKey = '';
       return;
     }
@@ -517,25 +529,10 @@
     return [...document.querySelectorAll(selector)].find((el) => normalize(el.textContent).toLowerCase().includes(wanted));
   }
 
-  function isHomeFeaturesReady() {
+  function isHomeFeaturesPage() {
     const pageMarker = findByText('.pageTitle,.tui-subtitle,h1,h2', 'Home features') ||
       document.querySelector('mat-select[formcontrolname="firmAlarm"], mat-select[formcontrolname="burglarAlarm"], #yearBuilt, [data-test-id="LIVABLE_SQUARE_FEET_INPUT"]');
-    const requiredSelectors = [
-      'mat-select[formcontrolname="firmAlarm"]',
-      'mat-select[formcontrolname="burglarAlarm"]',
-      'mat-select[formcontrolname="fortifiedHomeCertification"]',
-      'mat-select[formcontrolname="plumbing"]',
-      'mat-radio-group[formcontrolname="propertyLevelInd"]',
-      'mat-radio-group[formcontrolname="construction"]',
-      'mat-radio-group[formcontrolname="unrepairedStructuralDamage"]',
-      'mat-radio-group[formcontrolname="plumbingReplacedLast20Years"]',
-      'mat-radio-group[formcontrolname="solarPanelPresent"]',
-      '#trampolinecheckbox-input',
-      '#poolcheckbox-input'
-    ];
     return !!pageMarker &&
-      requiredSelectors.every((selector) => !!document.querySelector(selector)) &&
-      !!buttonByText('Continue') &&
       (!document.querySelector('.sidenav-current-step') || isCurrentSideNavStep('Home features'));
   }
 
@@ -562,47 +559,14 @@
     setStatus(`Waiting for ${label} to load`);
     await waitFor(readyFn, CFG.loadWaitMs);
     const start = Date.now();
-    let lastSignature = '';
-    let stableSince = 0;
-
-    while (Date.now() - start < CFG.loadWaitMs) {
-      if (!readyFn() || isPageBusy()) {
-        lastSignature = '';
-        stableSince = 0;
-        await sleep(CFG.pollMs);
-        continue;
-      }
-
-      const signature = pageLoadSignature();
-      if (signature === lastSignature) {
-        if (Date.now() - stableSince >= CFG.settleMs) {
-          log(`${label} loaded`);
-          return true;
-        }
-      } else {
-        lastSignature = signature;
-        stableSince = Date.now();
-      }
+    while (Date.now() - start < CFG.loadWaitMs && isPageBusy()) {
       await sleep(CFG.pollMs);
     }
 
-    throw new Error(`${label} did not finish loading`);
-  }
-
-  function pageLoadSignature() {
-    const controls = [...document.querySelectorAll('input,textarea,select,mat-select,mat-radio-group,mat-checkbox,button')]
-      .filter((el) => !state.panel?.contains(el));
-    const controlState = controls.map((el) => [
-      el.tagName,
-      el.id || el.getAttribute('formcontrolname') || el.getAttribute('aria-label') || '',
-      'value' in el ? el.value : normalize(el.textContent).slice(0, 40),
-      'checked' in el ? String(el.checked) : ''
-    ].join(':')).join('|');
-    const textLength = normalize([...document.body.children]
-      .filter((el) => el !== state.panel)
-      .map((el) => el.textContent)
-      .join(' ')).length;
-    return `${document.readyState}|${controls.length}|${textLength}|${controlState}`;
+    await sleep(CFG.settleMs);
+    await waitFor(readyFn, 2500);
+    log(`${label} loaded`);
+    return true;
   }
 
   function isPageBusy() {

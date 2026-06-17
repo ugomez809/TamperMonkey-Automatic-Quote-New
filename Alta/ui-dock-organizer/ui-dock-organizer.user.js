@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Cross-Origin UI Dock Organizer
 // @namespace    homebot.ui-dock-organizer
-// @version      1.8.0
+// @version      1.8.1
 // @description  Organizes every known floating workflow UI, including the organizer itself, with saved layout, resize, log hiding, multi-select moving, side snapping, and overlap prevention.
 // @author       OpenAI
 // @match        https://app.agencyzoom.com/*
@@ -25,7 +25,7 @@
   try { window.__HB_UI_DOCK_ORGANIZER_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'Cross-Origin UI Dock Organizer';
-  const VERSION = '1.8.0';
+  const VERSION = '1.8.1';
 
   // Log-export integration - workflow-origin dynamic key.
   const LOG_PERSIST_KEY = (() => {
@@ -1251,18 +1251,21 @@
         height:18px;
         z-index:2147483646;
         cursor:nwse-resize;
+        display:none;
         opacity:.45;
         background:linear-gradient(135deg, transparent 0 45%, rgba(255,255,255,.55) 46% 52%, transparent 53% 61%, rgba(255,255,255,.55) 62% 68%, transparent 69%);
       }
       .hb-ui-dock-managed:hover > .hb-ui-dock-resize-grip{
         opacity:.9;
       }
-      .hb-ui-dock-global-moving .hb-ui-dock-managed > .hb-ui-dock-barrier{
+      .hb-ui-dock-global-moving .hb-ui-dock-managed:not(.hb-ui-dock-organizer-managed) > .hb-ui-dock-barrier{
         display:block;
       }
-      .hb-ui-dock-global-moving .hb-ui-dock-managed > .hb-ui-dock-controls,
-      .hb-ui-dock-global-moving .hb-ui-dock-managed > .hb-ui-dock-resize-grip{
+      .hb-ui-dock-global-moving .hb-ui-dock-managed > .hb-ui-dock-controls{
         display:none;
+      }
+      .hb-ui-dock-global-moving .hb-ui-dock-managed > .hb-ui-dock-resize-grip{
+        display:block;
       }
       .hb-ui-dock-move-target button,
       .hb-ui-dock-move-target input,
@@ -1643,6 +1646,7 @@
       const el = item.el;
       el.dataset.hbUiDockKey = key;
       el.classList.add('hb-ui-dock-managed');
+      el.classList.toggle('hb-ui-dock-organizer-managed', isOrganizerPanel(el));
       bindDockItemDrag(el);
       ensureManagedChrome(item);
       applyPanelChromeState(item);
@@ -1734,6 +1738,7 @@
         try { findDirectChildByClass(el, className)?.remove(); } catch {}
       }
       el.classList.remove('hb-ui-dock-managed', 'hb-ui-dock-move-target', 'hb-ui-dock-selected');
+      el.classList.remove('hb-ui-dock-organizer-managed');
       delete el.dataset.hbUiDockKey;
       delete el.dataset.hbUiDockDragBound;
       delete el.dataset.hbUiDockLogsHidden;
@@ -2219,7 +2224,7 @@
   }
 
   function onResizeStart(e) {
-    if (state.moveMode) return;
+    if (!state.moveMode) return;
     if (e.button !== 0) return;
 
     const panel = e.currentTarget?.closest?.('.hb-ui-dock-managed');

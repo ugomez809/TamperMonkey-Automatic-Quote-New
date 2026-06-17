@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Cross-Origin UI Dock Organizer
 // @namespace    homebot.ui-dock-organizer
-// @version      1.8.2
+// @version      1.8.3
 // @description  Organizes every known floating workflow UI, including the organizer itself, with saved layout, resize, log hiding, multi-select moving, side snapping, and overlap prevention.
 // @author       OpenAI
 // @match        https://app.agencyzoom.com/*
@@ -25,7 +25,7 @@
   try { window.__HB_UI_DOCK_ORGANIZER_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'Cross-Origin UI Dock Organizer';
-  const VERSION = '1.8.2';
+  const VERSION = '1.8.3';
 
   // Log-export integration - workflow-origin dynamic key.
   const LOG_PERSIST_KEY = (() => {
@@ -1247,16 +1247,19 @@
         position:absolute;
         right:0;
         bottom:0;
-        width:18px;
-        height:18px;
+        width:30px;
+        height:30px;
         z-index:2147483646;
         cursor:nwse-resize;
         display:none;
-        opacity:.45;
-        background:linear-gradient(135deg, transparent 0 45%, rgba(255,255,255,.55) 46% 52%, transparent 53% 61%, rgba(255,255,255,.55) 62% 68%, transparent 69%);
+        opacity:.82;
+        pointer-events:auto;
+        background:linear-gradient(135deg, transparent 0 49%, rgba(250,204,21,.95) 50%);
+        clip-path:polygon(100% 0, 0 100%, 100% 100%);
+        filter:drop-shadow(0 0 4px rgba(0,0,0,.45));
       }
       .hb-ui-dock-managed:hover > .hb-ui-dock-resize-grip{
-        opacity:.9;
+        opacity:1;
       }
       .hb-ui-dock-global-moving .hb-ui-dock-managed:not(.hb-ui-dock-organizer-managed) > .hb-ui-dock-barrier{
         display:block;

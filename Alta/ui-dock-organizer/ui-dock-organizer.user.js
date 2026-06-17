@@ -1,13 +1,15 @@
 // ==UserScript==
 // @name         Cross-Origin UI Dock Organizer
 // @namespace    homebot.ui-dock-organizer
-// @version      1.7.11
-// @description  Organizes floating UIs safely inside the viewport. Biggest panel anchors bottom-right, others stack to the left within the anchor height, then continue upward on the right. On Alta, the organizer panel itself stays top-right. Includes active-script highlighting for opted-in panels.
+// @version      1.8.0
+// @description  Organizes every known floating workflow UI, including the organizer itself, with saved layout, resize, log hiding, multi-select moving, side snapping, and overlap prevention.
 // @author       OpenAI
 // @match        https://app.agencyzoom.com/*
 // @match        https://app.agencyzoom.com/referral/pipeline*
 // @match        https://farmersagent.lightning.force.com/*
 // @match        https://alta.farmers.com/*
+// @match        https://github.com/ugomez809/TamperMonkey-Automatic-Quote-New*
+// @match        https://raw.githubusercontent.com/ugomez809/TamperMonkey-Automatic-Quote-New/main/Alta/alta-updater-installer/alta-updater-installer.user.js*
 // @run-at       document-idle
 // @noframes
 // @grant        none
@@ -23,7 +25,7 @@
   try { window.__HB_UI_DOCK_ORGANIZER_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'Cross-Origin UI Dock Organizer';
-  const VERSION = '1.7.11';
+  const VERSION = '1.8.0';
 
   // Log-export integration - workflow-origin dynamic key.
   const LOG_PERSIST_KEY = (() => {
@@ -57,9 +59,14 @@
 
     maxLogs: 12,
     uiZ: 2147483647,
-    dockPosKey: 'tm_ui_dock_organizer_docked_ui_pos_v17',
+    dockPosKey: 'tm_ui_dock_organizer_panel_settings_v18',
     logsOpenKey: 'tm_ui_dock_organizer_logs_open_v13',
     hiddenKey: 'tm_ui_dock_organizer_hidden_v14',
+    panelZBase: 2147480000,
+    selectedZBase: 2147482600,
+    snapDistance: 14,
+    minPanelWidth: 210,
+    minPanelHeight: 90,
     activeStaleMs: 6000
   };
 
@@ -83,24 +90,34 @@
   const ORIGIN_SCRIPT_ORDER = {
     agencyzoom: [
       'az-stage-runner',
+      'shared-ticket-handoff',
       'az-ticket-finisher-tagger',
       'global-clear-launcher',
       'storage-tools',
-      'alta-payload-bridge'
+      'alta-payload-bridge',
+      'ui-dock-organizer'
     ],
     apex: [
       'apex-continue-new-quote',
       'apex-duplicates-continue',
       'apex-multi-agency-continue',
-      'alta-payload-bridge'
+      'shared-failure-selector',
+      'alta-payload-bridge',
+      'ui-dock-organizer'
     ],
     alta: [
       'alta-payload-bridge',
+      'payload-mirror-non-az-tab-closer',
+      'webhook-submission',
       'alta-customer-info',
       'alta-home-features',
       'alta-replacement-cost',
       'alta-home-coverage',
-      'alta-error-fixer'
+      'alta-error-fixer',
+      'shared-failure-selector',
+      'global-clear-launcher',
+      'storage-tools',
+      'ui-dock-organizer'
     ],
     workflow: []
   };
@@ -108,16 +125,22 @@
   const SCRIPT_PANEL_MAP = {
     'hb-az-stage-runner-panel': 'az-stage-runner',
     'tm-az-ticket-finisher-panel': 'az-ticket-finisher-tagger',
+    'hb-shared-az-alta-panel': 'shared-ticket-handoff',
     'hb-global-clear-launcher-panel': 'global-clear-launcher',
     'tm-az-apex-alta-storage-tools-v160': 'storage-tools',
     'hb-apex-continue-panel': 'apex-continue-new-quote',
     'hb-dup-v18-panel': 'apex-duplicates-continue',
+    'tm-alta-shared-failure-selector-panel': 'shared-failure-selector',
     'alta-payload-bridge-panel': 'alta-payload-bridge',
+    'tm-alta-payload-mirror-panel': 'payload-mirror-non-az-tab-closer',
+    'alta-webhook-panel': 'webhook-submission',
     'alta-customer-info-panel': 'alta-customer-info',
     'alta-home-features-panel': 'alta-home-features',
     'alta-replacement-cost-panel': 'alta-replacement-cost',
     'alta-home-coverage-panel': 'alta-home-coverage',
-    'alta-error-fixer-panel': 'alta-error-fixer'
+    'alta-error-fixer-panel': 'alta-error-fixer',
+    'tm-alta-updater-installer': 'alta-updater-installer',
+    'hb-ui-dock-organizer-panel-v13': 'ui-dock-organizer'
   };
 
   const state = {
@@ -129,6 +152,8 @@
     logsIntervalTimer: null,
     mo: null,
     drag: null,
+    resize: null,
+    selectedKeys: new Set(),
     lastRescanAt: 0,
     lastDockedCount: -1,
     uiHidden: false,
@@ -214,7 +239,11 @@
     try { window.removeEventListener('resize', onResize, true); } catch {}
     try { window.removeEventListener('mousemove', onDragMove, true); } catch {}
     try { window.removeEventListener('mouseup', onDragEnd, true); } catch {}
+    try { window.removeEventListener('mousemove', onResizeMove, true); } catch {}
+    try { window.removeEventListener('mouseup', onResizeEnd, true); } catch {}
     try { window.removeEventListener('storage', handleLogClearStorageEvent, true); } catch {}
+    try { document.documentElement.classList.remove('hb-ui-dock-global-moving'); } catch {}
+    try { cleanupManagedChrome(); } catch {}
     try { document.getElementById(UI.panelId)?.remove(); } catch {}
     try { document.getElementById(UI.styleId)?.remove(); } catch {}
   }
@@ -260,7 +289,7 @@
   }
 
   function onResize() {
-    enforceOrganizerAnchor();
+    if (!state.moveMode && !hasSavedOrganizerPosition()) enforceOrganizerAnchor();
     if (!state.running) return;
     setTimeout(() => {
       if (!state.running) return;
@@ -349,10 +378,12 @@
     for (const el of Array.from(state.registry.keys())) {
       if (!el || !el.isConnected || !seen.has(el) || !isDockCandidate(el)) {
         restoreHiddenElement(el);
+        state.selectedKeys.delete(getDockPositionKey(el));
         state.registry.delete(el);
       }
     }
 
+    syncSelectionClasses();
     updateUI();
   }
 
@@ -366,6 +397,24 @@
     try {
       for (const el of Array.from(document.documentElement?.children || [])) {
         if (el !== document.body && el !== document.head) set.add(el);
+      }
+    } catch {}
+
+    try {
+      for (const id of Object.keys(SCRIPT_PANEL_MAP)) {
+        const el = document.getElementById(id);
+        if (el) set.add(el);
+      }
+    } catch {}
+
+    try {
+      const selectors = [
+        '[data-hb-script-id]',
+        '[data-tm-alta-shared-failure-selector-ui]',
+        '[data-tm-az-finisher-ui]'
+      ];
+      for (const el of Array.from(document.querySelectorAll(selectors.join(',')))) {
+        if (el instanceof HTMLElement) set.add(el);
       }
     } catch {}
 
@@ -411,13 +460,24 @@
     const rect = el.getBoundingClientRect();
     if (!rect || rect.width <= 0 || rect.height <= 0) return false;
 
+    const explicitScriptId = detectScriptId(el);
+    const hasExplicitMarker = !!explicitScriptId ||
+      el.hasAttribute('data-hb-script-id') ||
+      el.hasAttribute('data-tm-alta-shared-failure-selector-ui') ||
+      el.hasAttribute('data-tm-az-finisher-ui');
+    const hasControls = !!el.querySelector('button, input, textarea, select, [role="button"]');
+
+    if (cs.pointerEvents === 'none' && !hasControls) return false;
+
     const vw = Math.max(window.innerWidth || 1, 1);
     const vh = Math.max(window.innerHeight || 1, 1);
     const areaRatio = (rect.width * rect.height) / (vw * vh);
 
-    if (rect.width > vw * CFG.maxWidthRatio) return false;
-    if (rect.height > vh * CFG.maxHeightRatio) return false;
-    if (areaRatio > CFG.maxAreaRatio) return false;
+    if (!hasExplicitMarker) {
+      if (rect.width > vw * CFG.maxWidthRatio) return false;
+      if (rect.height > vh * CFG.maxHeightRatio) return false;
+      if (areaRatio > CFG.maxAreaRatio) return false;
+    }
 
     const z = parseInt(cs.zIndex, 10);
     const marker = getMarkerText(el);
@@ -428,13 +488,13 @@
       /aqb:\s*(start|stop)/i.test(marker) ||
       /home bot/i.test(marker);
 
+    if (hasExplicitMarker) return true;
     if (!hasBigZ && !hasMarker) return false;
 
     if (/(toast|tooltip|modal|backdrop|overlay|spinner|loading|dropdown|listbox|menu|popover|dialog|autocomplete|suggestion)/i.test(marker)) {
       return false;
     }
 
-    const hasControls = !!el.querySelector('button, input, textarea, select, [role="button"]');
     const shortText = (el.textContent || '').replace(/\s+/g, ' ').trim();
 
     if (hasMarker) return true;
@@ -466,6 +526,29 @@
     return items;
   }
 
+  function getOrganizerItem() {
+    const el = getOrganizerPanel();
+    if (!(el instanceof HTMLElement) || !el.isConnected) return null;
+    const rect = el.getBoundingClientRect();
+    if (!rect || rect.width <= 0 || rect.height <= 0) return null;
+
+    return {
+      el,
+      scriptId: 'ui-dock-organizer',
+      order: 0,
+      width: Math.max(1, Math.ceil(rect.width)),
+      height: Math.max(1, Math.ceil(rect.height)),
+      area: Math.max(1, Math.ceil(rect.width * rect.height))
+    };
+  }
+
+  function getManagedItems(items = getDockItems()) {
+    const list = Array.isArray(items) ? items.slice() : [];
+    const organizer = getOrganizerItem();
+    if (organizer) list.unshift(organizer);
+    return list;
+  }
+
   function sortBiggestFirst(a, b) {
     if (b.height !== a.height) return b.height - a.height;
     if (b.area !== a.area) return b.area - a.area;
@@ -474,7 +557,11 @@
   }
 
   function arrangeDock() {
-    const items = getDockItems().sort(sortBiggestFirst);
+    let items = getDockItems().sort(sortBiggestFirst);
+    prepareManagedPanels(getManagedItems(items));
+
+    items = getDockItems().sort(sortBiggestFirst);
+    const managedItems = getManagedItems(items);
 
     if (items.length !== state.lastDockedCount) {
       state.lastDockedCount = items.length;
@@ -483,6 +570,15 @@
 
     if (!items.length) {
       state.activePanels = 0;
+      if (state.moveMode || hasSavedDockPositions()) {
+        applyDockedUiPositionMode(managedItems);
+        requestAnimationFrame(() => {
+          resolveAllOverlaps(managedItems);
+          for (const item of managedItems) clampElementIntoViewport(item.el);
+        });
+      } else if (!hasSavedOrganizerPosition()) {
+        enforceOrganizerAnchor();
+      }
       updateUI();
       return;
     }
@@ -494,19 +590,23 @@
     }
 
     applyActiveHighlights(items);
+    syncSelectionClasses();
     updateUI();
 
+    if (state.drag || state.resize) return;
+
     if (state.moveMode || hasSavedDockPositions()) {
-      applyDockedUiPositionMode(items);
+      applyDockedUiPositionMode(managedItems);
       requestAnimationFrame(() => {
-        for (const item of items) {
-          clampElementIntoViewport(item.el);
-        }
+        resolveAllOverlaps(managedItems);
+        for (const item of managedItems) clampElementIntoViewport(item.el);
       });
       return;
     }
 
-    setDockMoveTargets(items, false);
+    if (!hasSavedOrganizerPosition()) enforceOrganizerAnchor();
+    setDockMoveTargets(managedItems, false);
+    applySavedPanelSettings(managedItems);
 
     const placements = buildPlacements(items);
 
@@ -515,9 +615,9 @@
     }
 
     requestAnimationFrame(() => {
-      for (const item of items) {
-        clampElementIntoViewport(item.el);
-      }
+      const arranged = getManagedItems(getDockItems());
+      resolveAllOverlaps(arranged);
+      for (const item of arranged) clampElementIntoViewport(item.el);
     });
   }
 
@@ -668,6 +768,7 @@
       const key = getDockPositionKey(item);
       bindDockItemDrag(item.el);
       item.el.classList.toggle('hb-ui-dock-move-target', state.moveMode);
+      applySavedPanelSettings(item, saved);
 
       const pos = key ? saved[key] : null;
       if (pos && typeof pos.left === 'number' && typeof pos.top === 'number') {
@@ -707,10 +808,24 @@
   }
 
   function hasSavedDockPositions() {
-    return Object.keys(loadDockPositions()).length > 0;
+    return Object.values(loadDockPositions()).some((pos) => hasPanelPosition(pos) || hasPanelSize(pos));
   }
 
-  function saveDockPositions(items = getDockItems()) {
+  function hasSavedOrganizerPosition() {
+    const saved = loadDockPositions();
+    return hasPanelPosition(saved['script:ui-dock-organizer']);
+  }
+
+  function hasPanelPosition(pos) {
+    return !!pos && typeof pos.left === 'number' && typeof pos.top === 'number';
+  }
+
+  function hasPanelSize(pos) {
+    return !!pos && typeof pos.width === 'number' && typeof pos.height === 'number';
+  }
+
+  function saveDockPositions(items = getManagedItems()) {
+    const previous = loadDockPositions();
     const next = {};
 
     for (const item of items) {
@@ -721,20 +836,32 @@
       if (!rect || rect.width <= 0 || rect.height <= 0) continue;
 
       next[key] = {
+        ...previous[key],
         left: Math.round(rect.left),
         top: Math.round(rect.top),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height),
+        logsHidden: getPanelLogsHidden(item, previous),
         id: item.el.id || '',
         scriptId: item.scriptId || ''
       };
     }
 
     try { localStorage.setItem(CFG.dockPosKey, JSON.stringify(next)); } catch {}
-    state.savedDockLayout = Object.keys(next).length > 0;
+    state.savedDockLayout = Object.values(next).some((pos) => hasPanelPosition(pos) || hasPanelSize(pos));
     return state.savedDockLayout;
   }
 
   function clearDockPositions() {
-    try { localStorage.removeItem(CFG.dockPosKey); } catch {}
+    const saved = loadDockPositions();
+    for (const pos of Object.values(saved)) {
+      if (!pos || typeof pos !== 'object') continue;
+      delete pos.left;
+      delete pos.top;
+      delete pos.width;
+      delete pos.height;
+    }
+    try { localStorage.setItem(CFG.dockPosKey, JSON.stringify(saved)); } catch {}
     state.savedDockLayout = false;
   }
 
@@ -810,6 +937,7 @@
   function enforceOrganizerAnchor() {
     const panel = getOrganizerPanel();
     if (!panel) return;
+    if (state.moveMode || state.drag || state.resize || hasSavedOrganizerPosition()) return;
 
     if (isAgencyZoomOrigin()) {
       const profileAnchor = getAgencyZoomProfileAnchor();
@@ -859,6 +987,7 @@
 
   function detectScriptId(el) {
     if (!(el instanceof HTMLElement)) return '';
+    if (isOrganizerPanel(el)) return 'ui-dock-organizer';
     const explicit = normalizeText(
       el.getAttribute('data-hb-script-id') ||
       el.dataset?.hbScriptId ||
@@ -866,6 +995,8 @@
       ''
     );
     if (explicit) return explicit;
+    if (el.hasAttribute('data-tm-alta-shared-failure-selector-ui')) return 'shared-failure-selector';
+    if (el.hasAttribute('data-tm-az-finisher-ui')) return 'az-ticket-finisher-tagger';
     if (el.id && SCRIPT_PANEL_MAP[el.id]) return SCRIPT_PANEL_MAP[el.id];
     return '';
   }
@@ -977,7 +1108,7 @@
 
   function clampElementIntoViewport(el) {
     if (!el || !el.isConnected) return;
-    if (isOrganizerPanel(el)) {
+    if (isOrganizerPanel(el) && !state.moveMode && !hasSavedOrganizerPosition()) {
       enforceOrganizerAnchor();
       return;
     }
@@ -994,7 +1125,7 @@
     let nextLeft = clamp(rect.left, CFG.sideGap, maxLeft);
     let nextTop = clamp(rect.top, CFG.topGap, maxTop);
 
-    const organizerRect = getOrganizerRect();
+    const organizerRect = isOrganizerPanel(el) ? null : getOrganizerRect();
     if (organizerRect) {
       const overlapX = nextLeft < (organizerRect.right + CFG.itemGap) && (nextLeft + rect.width) > organizerRect.left;
       const overlapY = nextTop < (organizerRect.bottom + CFG.itemGap) && (nextTop + rect.height) > organizerRect.top;
@@ -1066,6 +1197,72 @@
         outline:2px solid rgba(250,204,21,.85) !important;
         outline-offset:2px !important;
         cursor:move !important;
+      }
+      .hb-ui-dock-selected{
+        outline:3px solid rgba(59,130,246,.95) !important;
+        outline-offset:3px !important;
+      }
+      .hb-ui-dock-managed{
+        min-width:${CFG.minPanelWidth}px !important;
+        min-height:${CFG.minPanelHeight}px !important;
+      }
+      .hb-ui-dock-controls{
+        position:absolute;
+        top:6px;
+        right:6px;
+        z-index:2147483647;
+        display:flex;
+        gap:4px;
+        opacity:.35;
+        transition:opacity .12s ease;
+        pointer-events:auto;
+      }
+      .hb-ui-dock-managed:hover > .hb-ui-dock-controls,
+      .hb-ui-dock-controls:focus-within{
+        opacity:1;
+      }
+      .hb-ui-dock-log-toggle{
+        border:1px solid rgba(255,255,255,.22) !important;
+        border-radius:6px !important;
+        background:rgba(15,23,42,.88) !important;
+        color:#fff !important;
+        font:700 10px/1 Arial,sans-serif !important;
+        padding:4px 6px !important;
+        cursor:pointer !important;
+        box-shadow:0 2px 8px rgba(0,0,0,.25) !important;
+      }
+      .hb-ui-dock-log-toggle.off{
+        background:rgba(127,29,29,.92) !important;
+      }
+      .hb-ui-dock-barrier{
+        position:absolute;
+        inset:0;
+        z-index:2147483645;
+        display:none;
+        background:rgba(14,18,26,.10);
+        cursor:move;
+        touch-action:none;
+      }
+      .hb-ui-dock-resize-grip{
+        position:absolute;
+        right:0;
+        bottom:0;
+        width:18px;
+        height:18px;
+        z-index:2147483646;
+        cursor:nwse-resize;
+        opacity:.45;
+        background:linear-gradient(135deg, transparent 0 45%, rgba(255,255,255,.55) 46% 52%, transparent 53% 61%, rgba(255,255,255,.55) 62% 68%, transparent 69%);
+      }
+      .hb-ui-dock-managed:hover > .hb-ui-dock-resize-grip{
+        opacity:.9;
+      }
+      .hb-ui-dock-global-moving .hb-ui-dock-managed > .hb-ui-dock-barrier{
+        display:block;
+      }
+      .hb-ui-dock-global-moving .hb-ui-dock-managed > .hb-ui-dock-controls,
+      .hb-ui-dock-global-moving .hb-ui-dock-managed > .hb-ui-dock-resize-grip{
+        display:none;
       }
       .hb-ui-dock-move-target button,
       .hb-ui-dock-move-target input,
@@ -1184,6 +1381,7 @@
 
     const panel = document.createElement('div');
     panel.id = UI.panelId;
+    panel.setAttribute('data-hb-script-id', 'ui-dock-organizer');
     panel.innerHTML = `
       <div id="${UI.headId}">
         <div>
@@ -1242,9 +1440,11 @@
         state.moveMode = true;
         log('Docked UI move mode enabled');
       } else {
-        const saved = saveDockPositions();
         state.moveMode = false;
         endDrag();
+        endResize();
+        const saved = saveDockPositions(getManagedItems());
+        clearSelection();
         log(saved ? 'Docked UI positions saved' : 'No docked UI positions to save');
       }
 
@@ -1255,8 +1455,10 @@
     document.getElementById(UI.resetPosId)?.addEventListener('click', () => {
       state.moveMode = false;
       endDrag();
+      endResize();
       clearDockPositions();
-      for (const item of getDockItems()) {
+      clearSelection();
+      for (const item of getManagedItems()) {
         item.el.classList.remove('hb-ui-dock-move-target');
       }
       log('Docked UI positions reset');
@@ -1323,6 +1525,8 @@
     if (panel) {
       panel.classList.toggle('hb-ui-dock-moving', state.moveMode);
     }
+
+    try { document.documentElement.classList.toggle('hb-ui-dock-global-moving', state.moveMode); } catch {}
 
     renderRuntimeList(runtimeEntries);
     renderLogs();
@@ -1411,6 +1615,250 @@
     try { localStorage.setItem(CFG.hiddenKey, hidden ? '1' : '0'); } catch {}
   }
 
+  function buildItemFromEl(el) {
+    if (!(el instanceof HTMLElement) || !el.isConnected) return null;
+    const rect = el.getBoundingClientRect();
+    if (!rect || rect.width <= 0 || rect.height <= 0) return null;
+    const meta = state.registry.get(el) || {};
+    return {
+      el,
+      scriptId: meta.scriptId || detectScriptId(el),
+      order: isOrganizerPanel(el) ? 0 : (meta.order || 9999),
+      width: Math.max(1, Math.ceil(rect.width)),
+      height: Math.max(1, Math.ceil(rect.height)),
+      area: Math.max(1, Math.ceil(rect.width * rect.height))
+    };
+  }
+
+  function prepareManagedPanels(items) {
+    const saved = loadDockPositions();
+    const seenKeys = new Set();
+
+    for (const item of items || []) {
+      if (!item?.el?.isConnected) continue;
+      const key = getDockPositionKey(item);
+      if (!key) continue;
+      seenKeys.add(key);
+
+      const el = item.el;
+      el.dataset.hbUiDockKey = key;
+      el.classList.add('hb-ui-dock-managed');
+      bindDockItemDrag(el);
+      ensureManagedChrome(item);
+      applyPanelChromeState(item);
+      applySavedPanelSettings(item, saved);
+    }
+
+    for (const key of Array.from(state.selectedKeys)) {
+      if (!seenKeys.has(key)) state.selectedKeys.delete(key);
+    }
+    syncSelectionClasses();
+  }
+
+  function applyPanelChromeState(item) {
+    if (!item?.el) return;
+    const key = getDockPositionKey(item);
+    const selected = state.selectedKeys.has(key);
+    const z = isOrganizerPanel(item.el)
+      ? CFG.uiZ
+      : Math.min(CFG.uiZ - 20, (selected ? CFG.selectedZBase : CFG.panelZBase) + Math.max(1, item.order || 1));
+
+    try {
+      item.el.style.setProperty('position', 'fixed', 'important');
+      item.el.style.setProperty('z-index', String(z), 'important');
+      item.el.style.setProperty('min-width', `${CFG.minPanelWidth}px`, 'important');
+      item.el.style.setProperty('min-height', `${CFG.minPanelHeight}px`, 'important');
+      item.el.style.setProperty('max-width', `calc(100vw - ${CFG.sideGap * 2}px)`, 'important');
+      item.el.style.setProperty('max-height', `calc(100vh - ${CFG.topGap + CFG.bottomGap}px)`, 'important');
+      item.el.style.setProperty('box-sizing', 'border-box', 'important');
+    } catch {}
+
+    item.el.classList.toggle('hb-ui-dock-move-target', state.moveMode);
+    item.el.classList.toggle('hb-ui-dock-selected', selected);
+  }
+
+  function findDirectChildByClass(parent, className) {
+    if (!parent?.children) return null;
+    return Array.from(parent.children).find((child) => child.classList?.contains(className)) || null;
+  }
+
+  function ensureManagedChrome(item) {
+    const el = item?.el;
+    if (!(el instanceof HTMLElement) || !el.isConnected) return;
+
+    let controls = findDirectChildByClass(el, 'hb-ui-dock-controls');
+    if (!controls) {
+      controls = document.createElement('div');
+      controls.className = 'hb-ui-dock-controls';
+      controls.setAttribute('data-hb-ui-dock-control', '1');
+
+      const logsButton = document.createElement('button');
+      logsButton.type = 'button';
+      logsButton.className = 'hb-ui-dock-log-toggle';
+      logsButton.textContent = 'LOGS';
+      logsButton.title = 'Hide or show this panel log area';
+      logsButton.setAttribute('data-hb-ui-dock-control', '1');
+      logsButton.addEventListener('click', onLogToggleClick, true);
+
+      controls.appendChild(logsButton);
+      el.appendChild(controls);
+    }
+
+    let barrier = findDirectChildByClass(el, 'hb-ui-dock-barrier');
+    if (!barrier) {
+      barrier = document.createElement('div');
+      barrier.className = 'hb-ui-dock-barrier';
+      barrier.setAttribute('data-hb-ui-dock-control', '1');
+      barrier.addEventListener('mousedown', onDockItemDragStart, true);
+      barrier.addEventListener('click', blockManagedPanelClick, true);
+      el.appendChild(barrier);
+    }
+
+    let grip = findDirectChildByClass(el, 'hb-ui-dock-resize-grip');
+    if (!grip) {
+      grip = document.createElement('div');
+      grip.className = 'hb-ui-dock-resize-grip';
+      grip.title = 'Resize';
+      grip.setAttribute('data-hb-ui-dock-control', '1');
+      grip.addEventListener('mousedown', onResizeStart, true);
+      el.appendChild(grip);
+    }
+  }
+
+  function cleanupManagedChrome() {
+    const nodes = Array.from(document.querySelectorAll('.hb-ui-dock-managed'));
+    for (const el of nodes) {
+      if (!(el instanceof HTMLElement)) continue;
+      try { el.removeEventListener('mousedown', onDockItemDragStart, true); } catch {}
+      for (const className of ['hb-ui-dock-controls', 'hb-ui-dock-barrier', 'hb-ui-dock-resize-grip']) {
+        try { findDirectChildByClass(el, className)?.remove(); } catch {}
+      }
+      el.classList.remove('hb-ui-dock-managed', 'hb-ui-dock-move-target', 'hb-ui-dock-selected');
+      delete el.dataset.hbUiDockKey;
+      delete el.dataset.hbUiDockDragBound;
+      delete el.dataset.hbUiDockLogsHidden;
+    }
+  }
+
+  function applySavedPanelSettings(itemsOrItem, saved = loadDockPositions()) {
+    const list = Array.isArray(itemsOrItem) ? itemsOrItem : [itemsOrItem];
+
+    for (const item of list) {
+      if (!item?.el?.isConnected) continue;
+      const key = getDockPositionKey(item);
+      const pos = key ? saved[key] : null;
+
+      if (!isActiveResizeKey(key) && pos && typeof pos.width === 'number' && typeof pos.height === 'number') {
+        applyPanelSize(item.el, pos.width, pos.height);
+      }
+
+      applyPanelLogHidden(item, getPanelLogsHidden(item, saved));
+    }
+  }
+
+  function getPanelLogsHidden(item, saved = loadDockPositions()) {
+    const key = getDockPositionKey(item);
+    const pos = key ? saved[key] : null;
+    if (typeof pos?.logsHidden === 'boolean') return pos.logsHidden;
+    if (isOrganizerPanel(item?.el)) return !loadLogsOpen();
+    return false;
+  }
+
+  function updateDockSetting(item, patch) {
+    const key = getDockPositionKey(item);
+    if (!key) return;
+    const saved = loadDockPositions();
+    saved[key] = {
+      ...(saved[key] || {}),
+      ...patch,
+      id: item?.el?.id || saved[key]?.id || '',
+      scriptId: item?.scriptId || detectScriptId(item?.el) || saved[key]?.scriptId || ''
+    };
+    try { localStorage.setItem(CFG.dockPosKey, JSON.stringify(saved)); } catch {}
+    state.savedDockLayout = hasSavedDockPositions();
+  }
+
+  function onLogToggleClick(event) {
+    const panel = event.currentTarget?.closest?.('.hb-ui-dock-managed');
+    const item = buildItemFromEl(panel);
+    if (!item) return;
+    const nextHidden = !getPanelLogsHidden(item);
+    updateDockSetting(item, { logsHidden: nextHidden });
+    applyPanelLogHidden(item, nextHidden);
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  function findPanelLogElements(panel) {
+    if (!(panel instanceof HTMLElement)) return [];
+    if (isOrganizerPanel(panel)) {
+      const wrap = document.getElementById(UI.logsWrapId);
+      return wrap ? [wrap] : [];
+    }
+
+    const found = new Set();
+    const nodes = Array.from(panel.querySelectorAll('textarea, [data-logs], [data-log], .hb-log, [id], [class]'));
+    for (const el of nodes) {
+      if (!(el instanceof HTMLElement)) continue;
+      if (el.closest('[data-hb-ui-dock-control]')) continue;
+      if (el.matches('button, input, select, option, a')) continue;
+
+      const marker = [
+        el.id || '',
+        typeof el.className === 'string' ? el.className : '',
+        el.getAttribute('data-logs') != null ? 'data-logs' : '',
+        el.getAttribute('data-log') != null ? 'data-log' : ''
+      ].join(' ').toLowerCase();
+
+      if (marker.includes('log')) found.add(el);
+    }
+
+    return Array.from(found);
+  }
+
+  function applyPanelLogHidden(item, hidden) {
+    const panel = item?.el;
+    if (!(panel instanceof HTMLElement) || !panel.isConnected) return;
+
+    if (isOrganizerPanel(panel)) {
+      setLogsOpen(!hidden);
+    } else {
+      for (const logEl of findPanelLogElements(panel)) {
+        if (hidden) {
+          if (!Object.prototype.hasOwnProperty.call(logEl.dataset, 'hbUiDockPrevDisplay')) {
+            logEl.dataset.hbUiDockPrevDisplay = logEl.style.display || '';
+          }
+          logEl.style.setProperty('display', 'none', 'important');
+        } else if (Object.prototype.hasOwnProperty.call(logEl.dataset, 'hbUiDockPrevDisplay')) {
+          if (logEl.dataset.hbUiDockPrevDisplay) logEl.style.display = logEl.dataset.hbUiDockPrevDisplay;
+          else logEl.style.removeProperty('display');
+          delete logEl.dataset.hbUiDockPrevDisplay;
+        }
+      }
+    }
+
+    panel.dataset.hbUiDockLogsHidden = hidden ? '1' : '0';
+    const button = findDirectChildByClass(panel, 'hb-ui-dock-controls')?.querySelector('.hb-ui-dock-log-toggle');
+    if (button) {
+      button.classList.toggle('off', hidden);
+      button.title = hidden ? 'Show this panel log area' : 'Hide this panel log area';
+      button.setAttribute('aria-pressed', hidden ? 'true' : 'false');
+    }
+  }
+
+  function syncSelectionClasses() {
+    for (const el of Array.from(document.querySelectorAll('.hb-ui-dock-managed'))) {
+      if (!(el instanceof HTMLElement)) continue;
+      const key = getDockPositionKey(el);
+      el.classList.toggle('hb-ui-dock-selected', !!key && state.selectedKeys.has(key));
+    }
+  }
+
+  function clearSelection() {
+    state.selectedKeys.clear();
+    syncSelectionClasses();
+  }
+
   function applyPanelPos(panel, left, top) {
     if (!panel) return;
 
@@ -1430,6 +1878,18 @@
     } catch {}
   }
 
+  function applyPanelSize(panel, width, height) {
+    if (!(panel instanceof HTMLElement)) return;
+    const maxWidth = Math.max(CFG.minPanelWidth, window.innerWidth - (CFG.sideGap * 2));
+    const maxHeight = Math.max(CFG.minPanelHeight, window.innerHeight - CFG.topGap - CFG.bottomGap);
+    try {
+      panel.style.setProperty('width', `${clamp(Math.round(width), CFG.minPanelWidth, maxWidth)}px`, 'important');
+      panel.style.setProperty('height', `${clamp(Math.round(height), CFG.minPanelHeight, maxHeight)}px`, 'important');
+      panel.style.setProperty('overflow', 'auto', 'important');
+      panel.style.setProperty('box-sizing', 'border-box', 'important');
+    } catch {}
+  }
+
   function pinPanelAtCurrentPosition(panel) {
     if (!panel) return;
     const rect = panel.getBoundingClientRect();
@@ -1445,7 +1905,240 @@
   }
 
   function isInteractiveDragTarget(target) {
+    if (target?.closest?.('[data-hb-ui-dock-control]')) return false;
     return !!target?.closest?.('button, input, textarea, select, option, a, [role="button"], [contenteditable="true"]');
+  }
+
+  function blockManagedPanelClick(event) {
+    if (!state.moveMode) return;
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  function getManagedPanelFromEvent(event) {
+    const current = event.currentTarget;
+    if (current instanceof HTMLElement && current.classList.contains('hb-ui-dock-managed')) return current;
+    return event.target?.closest?.('.hb-ui-dock-managed') || null;
+  }
+
+  function getSelectedManagedItems() {
+    const selected = [];
+    for (const item of getManagedItems()) {
+      const key = getDockPositionKey(item);
+      if (key && state.selectedKeys.has(key)) selected.push(item);
+    }
+    return selected;
+  }
+
+  function selectOnly(key) {
+    state.selectedKeys.clear();
+    if (key) state.selectedKeys.add(key);
+    syncSelectionClasses();
+  }
+
+  function toggleSelectedKey(key) {
+    if (!key) return;
+    if (state.selectedKeys.has(key)) state.selectedKeys.delete(key);
+    else state.selectedKeys.add(key);
+    syncSelectionClasses();
+  }
+
+  function rectFromItem(item) {
+    if (!item?.el?.isConnected) return null;
+    const rect = item.el.getBoundingClientRect();
+    if (!rect || rect.width <= 0 || rect.height <= 0) return null;
+    return {
+      item,
+      key: getDockPositionKey(item),
+      left: rect.left,
+      top: rect.top,
+      width: rect.width,
+      height: rect.height
+    };
+  }
+
+  function rectRight(rect) {
+    return rect.left + rect.width;
+  }
+
+  function rectBottom(rect) {
+    return rect.top + rect.height;
+  }
+
+  function groupBounds(rects) {
+    const left = Math.min(...rects.map((rect) => rect.left));
+    const top = Math.min(...rects.map((rect) => rect.top));
+    const right = Math.max(...rects.map(rectRight));
+    const bottom = Math.max(...rects.map(rectBottom));
+    return { left, top, width: right - left, height: bottom - top };
+  }
+
+  function translateRects(rects, dx, dy) {
+    if (!dx && !dy) return rects;
+    return rects.map((rect) => ({ ...rect, left: rect.left + dx, top: rect.top + dy }));
+  }
+
+  function viewportClampDelta(bounds) {
+    const vw = Math.max(window.innerWidth || 1, 1);
+    const vh = Math.max(window.innerHeight || 1, 1);
+    let dx = 0;
+    let dy = 0;
+    const maxRight = vw - CFG.sideGap;
+    const maxBottom = vh - CFG.bottomGap;
+
+    if (bounds.left < CFG.sideGap) dx = CFG.sideGap - bounds.left;
+    if (bounds.left + bounds.width + dx > maxRight) dx = maxRight - (bounds.left + bounds.width);
+    if (bounds.top < CFG.topGap) dy = CFG.topGap - bounds.top;
+    if (bounds.top + bounds.height + dy > maxBottom) dy = maxBottom - (bounds.top + bounds.height);
+
+    return { dx, dy };
+  }
+
+  function clampGroupRects(rects) {
+    if (!rects.length) return rects;
+    const delta = viewportClampDelta(groupBounds(rects));
+    return translateRects(rects, delta.dx, delta.dy);
+  }
+
+  function clampSingleRect(rect) {
+    const vw = Math.max(window.innerWidth || 1, 1);
+    const vh = Math.max(window.innerHeight || 1, 1);
+    const maxLeft = Math.max(CFG.sideGap, vw - rect.width - CFG.sideGap);
+    const maxTop = Math.max(CFG.topGap, vh - rect.height - CFG.bottomGap);
+    return {
+      ...rect,
+      left: clamp(rect.left, CFG.sideGap, maxLeft),
+      top: clamp(rect.top, CFG.topGap, maxTop)
+    };
+  }
+
+  function rangesOverlapOrNear(a1, a2, b1, b2, gap = 0) {
+    return a1 <= b2 + gap && a2 >= b1 - gap;
+  }
+
+  function rectsOverlap(a, b, gap = 0) {
+    return a.left < rectRight(b) + gap &&
+      rectRight(a) > b.left - gap &&
+      a.top < rectBottom(b) + gap &&
+      rectBottom(a) > b.top - gap;
+  }
+
+  function getObstacleRects(excludeKeys = new Set()) {
+    const rects = [];
+    for (const item of getManagedItems()) {
+      const key = getDockPositionKey(item);
+      if (!key || excludeKeys.has(key)) continue;
+      const rect = rectFromItem(item);
+      if (rect) rects.push(rect);
+    }
+    return rects;
+  }
+
+  function snapGroupRects(rects, obstacles) {
+    if (!rects.length) return rects;
+    const group = groupBounds(rects);
+    let bestDx = 0;
+    let bestDy = 0;
+    let bestAbsX = CFG.snapDistance + 1;
+    let bestAbsY = CFG.snapDistance + 1;
+    const gap = CFG.itemGap;
+
+    function considerX(dx) {
+      const abs = Math.abs(dx);
+      if (abs <= CFG.snapDistance && abs < bestAbsX) {
+        bestAbsX = abs;
+        bestDx = dx;
+      }
+    }
+
+    function considerY(dy) {
+      const abs = Math.abs(dy);
+      if (abs <= CFG.snapDistance && abs < bestAbsY) {
+        bestAbsY = abs;
+        bestDy = dy;
+      }
+    }
+
+    considerX(CFG.sideGap - group.left);
+    considerX((window.innerWidth - CFG.sideGap) - (group.left + group.width));
+    considerY(CFG.topGap - group.top);
+    considerY((window.innerHeight - CFG.bottomGap) - (group.top + group.height));
+
+    for (const obstacle of obstacles) {
+      if (rangesOverlapOrNear(group.top, group.top + group.height, obstacle.top, rectBottom(obstacle), CFG.snapDistance * 2)) {
+        considerX(rectRight(obstacle) + gap - group.left);
+        considerX(obstacle.left - gap - (group.left + group.width));
+      }
+      if (rangesOverlapOrNear(group.left, group.left + group.width, obstacle.left, rectRight(obstacle), CFG.snapDistance * 2)) {
+        considerY(rectBottom(obstacle) + gap - group.top);
+        considerY(obstacle.top - gap - (group.top + group.height));
+      }
+    }
+
+    return clampGroupRects(translateRects(rects, bestDx, bestDy));
+  }
+
+  function moveRectAwayFrom(rect, obstacle) {
+    const gap = CFG.itemGap;
+    const expanded = {
+      left: obstacle.left - gap,
+      top: obstacle.top - gap,
+      width: obstacle.width + (gap * 2),
+      height: obstacle.height + (gap * 2)
+    };
+    const candidates = [
+      { dx: expanded.left - rectRight(rect), dy: 0 },
+      { dx: rectRight(expanded) - rect.left, dy: 0 },
+      { dx: 0, dy: expanded.top - rectBottom(rect) },
+      { dx: 0, dy: rectBottom(expanded) - rect.top }
+    ].sort((a, b) => (Math.abs(a.dx) + Math.abs(a.dy)) - (Math.abs(b.dx) + Math.abs(b.dy)));
+
+    for (const candidate of candidates) {
+      const shifted = clampSingleRect({ ...rect, left: rect.left + candidate.dx, top: rect.top + candidate.dy });
+      if (!rectsOverlap(shifted, obstacle, gap)) return shifted;
+    }
+
+    const fallback = candidates[0] || { dx: 0, dy: 0 };
+    return clampSingleRect({ ...rect, left: rect.left + fallback.dx, top: rect.top + fallback.dy });
+  }
+
+  function repelGroupFromObstacles(rects, obstacles) {
+    let next = clampGroupRects(rects);
+    for (let pass = 0; pass < 8; pass++) {
+      const group = groupBounds(next);
+      const obstacle = obstacles.find((candidate) => rectsOverlap(group, candidate, CFG.itemGap));
+      if (!obstacle) break;
+      const moved = moveRectAwayFrom(group, obstacle);
+      next = clampGroupRects(translateRects(next, moved.left - group.left, moved.top - group.top));
+    }
+    return next;
+  }
+
+  function resolveAllOverlaps(items) {
+    const rects = (items || [])
+      .map(rectFromItem)
+      .filter(Boolean)
+      .sort((a, b) => {
+        if (isOrganizerPanel(a.item.el)) return -1;
+        if (isOrganizerPanel(b.item.el)) return 1;
+        return (a.item.order || 0) - (b.item.order || 0);
+      });
+
+    const placed = [];
+    for (let rect of rects) {
+      rect = clampSingleRect(rect);
+      for (let pass = 0; pass < 8; pass++) {
+        const overlap = placed.find((candidate) => rectsOverlap(rect, candidate, CFG.itemGap));
+        if (!overlap) break;
+        rect = moveRectAwayFrom(rect, overlap);
+      }
+      placed.push(rect);
+      applyPanelPos(rect.item.el, rect.left, rect.top);
+    }
+  }
+
+  function isActiveResizeKey(key) {
+    return !!key && state.resize?.key === key;
   }
 
   function onDockItemDragStart(e) {
@@ -1453,21 +2146,33 @@
     if (e.button !== 0) return;
     if (isInteractiveDragTarget(e.target)) return;
 
-    const el = e.currentTarget;
-    if (!(el instanceof HTMLElement) || !el.isConnected || isOrganizerPanel(el)) return;
+    const el = getManagedPanelFromEvent(e);
+    if (!(el instanceof HTMLElement) || !el.isConnected) return;
+    const item = buildItemFromEl(el);
+    const key = getDockPositionKey(item);
+    if (!item || !key) return;
 
-    const rect = el.getBoundingClientRect();
-    if (!rect || rect.width <= 0 || rect.height <= 0) return;
+    if (e.ctrlKey || e.metaKey) {
+      toggleSelectedKey(key);
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+
+    if (!state.selectedKeys.has(key)) selectOnly(key);
+
+    const selectedItems = getSelectedManagedItems();
+    const dragItems = selectedItems.length ? selectedItems : [item];
+    const rects = dragItems.map(rectFromItem).filter(Boolean);
+    if (!rects.length) return;
+
+    for (const rect of rects) applyPanelPos(rect.item.el, rect.left, rect.top);
 
     state.drag = {
-      el,
+      items: rects,
       startX: e.clientX,
-      startY: e.clientY,
-      left: rect.left,
-      top: rect.top
+      startY: e.clientY
     };
-
-    applyPanelPos(el, rect.left, rect.top);
 
     document.body.style.userSelect = 'none';
     window.addEventListener('mousemove', onDragMove, true);
@@ -1478,21 +2183,27 @@
   }
 
   function onDragMove(e) {
-    if (!state.drag) return;
+    const drag = state.drag;
+    if (!drag?.items?.length) return;
 
-    const el = state.drag.el;
-    if (!el || !el.isConnected) return;
+    const dx = e.clientX - drag.startX;
+    const dy = e.clientY - drag.startY;
+    const excludeKeys = new Set(drag.items.map((rect) => rect.key).filter(Boolean));
+    const obstacles = getObstacleRects(excludeKeys);
+    let next = drag.items.map((rect) => ({ ...rect, left: rect.left + dx, top: rect.top + dy }));
 
-    const dx = e.clientX - state.drag.startX;
-    const dy = e.clientY - state.drag.startY;
+    next = snapGroupRects(next, obstacles);
+    next = repelGroupFromObstacles(next, obstacles);
 
-    applyPanelPos(el, state.drag.left + dx, state.drag.top + dy);
+    for (const rect of next) applyPanelPos(rect.item.el, rect.left, rect.top);
     e.preventDefault();
+    e.stopPropagation();
   }
 
   function onDragEnd() {
     if (state.moveMode) {
-      saveDockPositions();
+      resolveAllOverlaps(getManagedItems());
+      saveDockPositions(getManagedItems());
       updateUI();
       if (state.running) fullScanAndArrange();
     }
@@ -1505,5 +2216,106 @@
     try { document.body.style.userSelect = ''; } catch {}
     window.removeEventListener('mousemove', onDragMove, true);
     window.removeEventListener('mouseup', onDragEnd, true);
+  }
+
+  function onResizeStart(e) {
+    if (state.moveMode) return;
+    if (e.button !== 0) return;
+
+    const panel = e.currentTarget?.closest?.('.hb-ui-dock-managed');
+    const item = buildItemFromEl(panel);
+    const key = getDockPositionKey(item);
+    if (!item || !key) return;
+
+    const rect = item.el.getBoundingClientRect();
+    if (!rect || rect.width <= 0 || rect.height <= 0) return;
+
+    state.resize = {
+      item,
+      key,
+      startX: e.clientX,
+      startY: e.clientY,
+      left: rect.left,
+      top: rect.top,
+      width: rect.width,
+      height: rect.height
+    };
+
+    pinPanelAtCurrentPosition(item.el);
+    document.body.style.userSelect = 'none';
+    window.addEventListener('mousemove', onResizeMove, true);
+    window.addEventListener('mouseup', onResizeEnd, true);
+
+    e.preventDefault();
+    e.stopPropagation();
+  }
+
+  function limitResizeRect(rect, key) {
+    let maxWidth = Math.max(CFG.minPanelWidth, window.innerWidth - CFG.sideGap - rect.left);
+    let maxHeight = Math.max(CFG.minPanelHeight, window.innerHeight - CFG.bottomGap - rect.top);
+
+    for (const obstacle of getObstacleRects(new Set([key]))) {
+      const verticalOverlap = rangesOverlapOrNear(rect.top, rect.top + rect.height, obstacle.top, rectBottom(obstacle), 0);
+      const horizontalOverlap = rangesOverlapOrNear(rect.left, rect.left + rect.width, obstacle.left, rectRight(obstacle), 0);
+
+      if (verticalOverlap && rect.left < obstacle.left) {
+        maxWidth = Math.min(maxWidth, obstacle.left - CFG.itemGap - rect.left);
+      }
+      if (horizontalOverlap && rect.top < obstacle.top) {
+        maxHeight = Math.min(maxHeight, obstacle.top - CFG.itemGap - rect.top);
+      }
+    }
+
+    return {
+      ...rect,
+      width: clamp(rect.width, CFG.minPanelWidth, Math.max(CFG.minPanelWidth, maxWidth)),
+      height: clamp(rect.height, CFG.minPanelHeight, Math.max(CFG.minPanelHeight, maxHeight))
+    };
+  }
+
+  function onResizeMove(e) {
+    const resize = state.resize;
+    if (!resize?.item?.el?.isConnected) return;
+
+    const raw = {
+      item: resize.item,
+      key: resize.key,
+      left: resize.left,
+      top: resize.top,
+      width: resize.width + (e.clientX - resize.startX),
+      height: resize.height + (e.clientY - resize.startY)
+    };
+    const next = limitResizeRect(raw, resize.key);
+
+    applyPanelSize(resize.item.el, next.width, next.height);
+    clampElementIntoViewport(resize.item.el);
+    e.preventDefault();
+    e.stopPropagation();
+  }
+
+  function onResizeEnd() {
+    if (state.resize?.item?.el?.isConnected) {
+      const item = buildItemFromEl(state.resize.item.el) || state.resize.item;
+      const rect = item.el.getBoundingClientRect();
+      updateDockSetting(item, {
+        left: Math.round(rect.left),
+        top: Math.round(rect.top),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height),
+        logsHidden: getPanelLogsHidden(item)
+      });
+      resolveAllOverlaps(getManagedItems());
+      saveDockPositions(getManagedItems());
+      if (state.running) fullScanAndArrange();
+    }
+
+    endResize();
+  }
+
+  function endResize() {
+    state.resize = null;
+    try { document.body.style.userSelect = ''; } catch {}
+    window.removeEventListener('mousemove', onResizeMove, true);
+    window.removeEventListener('mouseup', onResizeEnd, true);
   }
 })();

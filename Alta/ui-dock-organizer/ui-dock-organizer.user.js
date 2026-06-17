@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Cross-Origin UI Dock Organizer
 // @namespace    homebot.ui-dock-organizer
-// @version      1.8.1
+// @version      1.8.2
 // @description  Organizes every known floating workflow UI, including the organizer itself, with saved layout, resize, log hiding, multi-select moving, side snapping, and overlap prevention.
 // @author       OpenAI
 // @match        https://app.agencyzoom.com/*
@@ -25,7 +25,7 @@
   try { window.__HB_UI_DOCK_ORGANIZER_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'Cross-Origin UI Dock Organizer';
-  const VERSION = '1.8.1';
+  const VERSION = '1.8.2';
 
   // Log-export integration - workflow-origin dynamic key.
   const LOG_PERSIST_KEY = (() => {
@@ -2149,6 +2149,7 @@
   function onDockItemDragStart(e) {
     if (!state.moveMode) return;
     if (e.button !== 0) return;
+    if (e.target?.closest?.('.hb-ui-dock-resize-grip')) return;
     if (isInteractiveDragTarget(e.target)) return;
 
     const el = getManagedPanelFromEvent(e);

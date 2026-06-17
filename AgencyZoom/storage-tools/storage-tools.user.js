@@ -103,7 +103,12 @@
     'tm_alta_webhook_submit_url_v17',
     'tm_alta_webhook_submit_stopped_v17',
     'tm_alta_webhook_post_success_v1',
+    'tm_alta_webhook_post_success_consumed_v1',
+    'tm_alta_force_send_now_v1',
+    'tm_alta_shared_failure_selector_sent_v1',
     'tm_alta_payload_mirror_close_signal_v1',
+    'tm_alta_payload_mirror_lex_close_consumed_signal_v1',
+    'tm_alta_payload_mirror_ignore_close_lease_v1',
     'tm_alta_payload_mirror_last_handled_signal_v1',
     'tm_alta_payload_mirror_close_attempted_v1',
     'tm_az_alta_final_payload_v1',
@@ -112,7 +117,10 @@
     'tm_alta_header_timeout_runtime_v2',
     'tm_alta_header_timeout_sent_events_v2',
     'tm_alta_flow_stage_v1',
-    ...DISABLED_AUTO_LOG_KEYS
+    ...DISABLED_AUTO_LOG_KEYS,
+    'hb_shared_az_to_alta_ticket_handoff_v1',
+    'hb_shared_az_to_alta_ticket_handoff_last_applied_v1',
+    'hb_shared_az_to_alta_ticket_handoff_stop_v1'
   ]);
 
   const AUTO_CLEAR_PREFIXES = [

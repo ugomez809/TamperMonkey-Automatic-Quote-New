@@ -72,7 +72,10 @@
 
   const PROJECT_EXACT_KEYS = [
     '__hb_apex_qna_stop_this_session__',
-    'az_ha_panel_left_v12'
+    'az_ha_panel_left_v12',
+    'hb_shared_az_to_alta_ticket_handoff_v1',
+    'hb_shared_az_to_alta_ticket_handoff_last_applied_v1',
+    'hb_shared_az_to_alta_ticket_handoff_stop_v1'
   ];
 
   const state = {

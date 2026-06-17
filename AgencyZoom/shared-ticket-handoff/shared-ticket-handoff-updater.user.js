@@ -1,12 +1,12 @@
 // ==UserScript==
-// @name         Alta Payload Mirror + Non-AZ Tab Closer Updater
-// @namespace    homebot.payload-mirror-non-az-tab-closer.updater
+// @name         Alta Shared Ticket Handoff Updater
+// @namespace    homebot.shared-ticket-handoff.updater
 // @version      0.1.0
-// @description  Loads and auto-updates the Alta Payload Mirror + Non-AZ Tab Closer script from GitHub.
+// @description  Loads and auto-updates the Alta Shared Ticket Handoff script from GitHub.
 // @author       OpenAI
-// @match        https://alta.farmers.com/*
-// @match        https://farmersagent.lightning.force.com/*
 // @match        https://app.agencyzoom.com/*
+// @match        https://app.agencyzoom.com/referral/pipeline*
+// @match        https://alta.farmers.com/*
 // @run-at       document-idle
 // @noframes
 // @grant        GM_xmlhttpRequest
@@ -17,17 +17,17 @@
 // @grant        GM_registerMenuCommand
 // @connect      raw.githubusercontent.com
 // @connect      *
-// @updateURL    https://raw.githubusercontent.com/ugomez809/TamperMonkey-Automatic-Quote-New/main/Alta/payload-mirror-non-az-tab-closer/payload-mirror-non-az-tab-closer-updater.user.js
-// @downloadURL  https://raw.githubusercontent.com/ugomez809/TamperMonkey-Automatic-Quote-New/main/Alta/payload-mirror-non-az-tab-closer/payload-mirror-non-az-tab-closer-updater.user.js
+// @updateURL    https://raw.githubusercontent.com/ugomez809/TamperMonkey-Automatic-Quote-New/main/AgencyZoom/shared-ticket-handoff/shared-ticket-handoff-updater.user.js
+// @downloadURL  https://raw.githubusercontent.com/ugomez809/TamperMonkey-Automatic-Quote-New/main/AgencyZoom/shared-ticket-handoff/shared-ticket-handoff-updater.user.js
 // ==/UserScript==
 
 (function () {
   'use strict';
   const LOADER_VERSION = '0.1.0';
-  const TARGET_ID = 'payload-mirror-non-az-tab-closer';
-  const TARGET_LABEL = 'Alta Payload Mirror + Non-AZ Tab Closer';
-  const TARGET_FILE = 'payload-mirror-non-az-tab-closer.user.js';
-  const BASE_URL = 'https://raw.githubusercontent.com/ugomez809/TamperMonkey-Automatic-Quote-New/main/Alta/payload-mirror-non-az-tab-closer';
+  const TARGET_ID = 'shared-ticket-handoff';
+  const TARGET_LABEL = 'Alta Shared Ticket Handoff';
+  const TARGET_FILE = 'shared-ticket-handoff.user.js';
+  const BASE_URL = 'https://raw.githubusercontent.com/ugomez809/TamperMonkey-Automatic-Quote-New/main/AgencyZoom/shared-ticket-handoff';
   const CHECK_INTERVAL_MS = 30 * 1000;
   const RELOAD_DELAY_MS = 1200;
   const CACHE_KEY = `tmAltaPerScriptUpdater:${TARGET_ID}:code`;

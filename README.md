@@ -24,6 +24,7 @@ Active AgencyZoom scripts live in `AgencyZoom/`.
 | Folder | Purpose |
 | --- | --- |
 | `az-stage-runner/` | Starts the Home quote workflow from AgencyZoom and publishes the job payload for APEX/Alta. |
+| `shared-ticket-handoff/` | Carries the AgencyZoom ticket payload into Alta and seeds current job, Home payload, and webhook bundle state. |
 | `az-ticket-finisher-tagger/` | Reads the Alta final payload back in AgencyZoom, updates the ticket, adds the note/tag, and completes it. |
 | `global-clear-launcher/` | Clears workflow storage and opens AgencyZoom, APEX, and Alta cleanly. |
 | `storage-tools/` | Exports, mirrors, and clears tracked AgencyZoom/APEX/Alta workflow storage. |
@@ -37,6 +38,7 @@ Active APEX scripts live in `Apex-LEX/`.
 | `apex-continue-new-quote/` | Continues the APEX Home quote flow. The Alta-ineligible checkbox auto-click has been removed. |
 | `apex-duplicates-continue/` | Handles the APEX duplicate-check screen and continues the quote flow. |
 | `apex-multi-agency-continue/` | Handles the APEX multi-agency screen and clicks Next when needed. |
+| `shared-failure-selector/` | Records shared failure selectors for LEX/Alta, publishes failed-path triggers, and bridges them into AgencyZoom. |
 
 ### Alta
 
@@ -45,6 +47,8 @@ Active Alta Home quote scripts live in `Alta/`.
 | Folder | Purpose |
 | --- | --- |
 | `alta-payload-bridge/` | Mirrors AgencyZoom/APEX job data into Alta and returns Alta quote results to AgencyZoom. |
+| `payload-mirror-non-az-tab-closer/` | Mirrors final Alta payloads after webhook success and closes non-AgencyZoom tabs. |
+| `webhook-submission/` | Sends the final Alta Home quote bundle to the configured webhook. |
 | `alta-customer-info/` | Runs on Alta customer information. |
 | `alta-home-features/` | Runs on Alta home features. |
 | `alta-replacement-cost/` | Runs on Alta replacement cost. |
@@ -53,9 +57,9 @@ Active Alta Home quote scripts live in `Alta/`.
 | `alta-updater-installer/` | Opens only the active AgencyZoom/APEX/Alta updater install links. |
 | `ui-dock-organizer/` | Cross-origin UI fixer that keeps floating helper panels organized on AgencyZoom, APEX, and Alta. |
 
-The old GWPC folders are retired no-op stubs kept only so already-installed
-Tampermonkey scripts can update into harmless "safe to delete" scripts. They are
-not part of the workflow and are not opened by the installer.
+Some old GWPC folders are still retired no-op stubs for this Alta project only.
+`payload-mirror-non-az-tab-closer/` and `webhook-submission/` have been
+recreated as active Alta workflow scripts.
 
 ## Update URLs
 
@@ -69,5 +73,5 @@ Use this single installer to open the updater script install tabs for the hosted
 
 `https://raw.githubusercontent.com/ugomez809/TamperMonkey-Automatic-Quote-New/main/Alta/alta-updater-installer/alta-updater-installer.user.js`
 
-The installer opens updater scripts only. The retired GWPC scripts are not part
-of that list.
+The installer opens updater scripts only, including the active Alta handoff,
+failure-selector, webhook, and payload-mirror scripts.

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Alta Quoting Updater Installer
 // @namespace    homebot.alta-updater-installer
-// @version      0.2.3
+// @version      0.2.4
 // @description  Opens the updater-only install links for the AgencyZoom, APEX, and Alta quoting workflow.
 // @author       OpenAI
 // @match        https://github.com/ugomez809/TamperMonkey-Automatic-Quote-New*
@@ -20,6 +20,7 @@
 
   const UPDATERS = [
     ['AgencyZoom Quote Launcher + Payload Grabber Updater', 'AgencyZoom/az-stage-runner/az-stage-runner-updater.user.js'],
+    ['Alta Shared Ticket Handoff Updater', 'AgencyZoom/shared-ticket-handoff/shared-ticket-handoff-updater.user.js'],
     ['AgencyZoom Ticket Finisher + Tagger Updater', 'AgencyZoom/az-ticket-finisher-tagger/az-ticket-finisher-tagger-updater.user.js'],
     ['Cross-Origin Global Clear Launcher Updater', 'AgencyZoom/global-clear-launcher/global-clear-launcher-updater.user.js'],
     ['Cross-Origin Storage Tools Updater', 'AgencyZoom/storage-tools/storage-tools-updater.user.js'],
@@ -27,7 +28,10 @@
     ['APEX Home Quote Continue Updater', 'Apex-LEX/apex-continue-new-quote/apex-continue-new-quote-updater.user.js'],
     ['APEX Duplicate Check Continue Updater', 'Apex-LEX/apex-duplicates-continue/apex-duplicates-continue-updater.user.js'],
     ['APEX Multi-Agency Continue Updater', 'Apex-LEX/apex-multi-agency-continue/apex-multi-agency-continue-updater.user.js'],
+    ['Alta Shared Failure Selector Updater', 'Apex-LEX/shared-failure-selector/shared-failure-selector-updater.user.js'],
     ['Alta Payload Bridge Updater', 'Alta/alta-payload-bridge/alta-payload-bridge-updater.user.js'],
+    ['Alta Payload Mirror + Non-AZ Tab Closer Updater', 'Alta/payload-mirror-non-az-tab-closer/payload-mirror-non-az-tab-closer-updater.user.js'],
+    ['Alta Webhook Submission Updater', 'Alta/webhook-submission/webhook-submission-updater.user.js'],
     ['Alta Customer Info Updater', 'Alta/alta-customer-info/alta-customer-info-updater.user.js'],
     ['Alta Home Features Updater', 'Alta/alta-home-features/alta-home-features-updater.user.js'],
     ['Alta Replacement Cost Updater', 'Alta/alta-replacement-cost/alta-replacement-cost-updater.user.js'],

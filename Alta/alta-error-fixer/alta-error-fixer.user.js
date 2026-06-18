@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Alta Error Fixer
 // @namespace    homebot.alta-error-fixer
-// @version      0.1.3
+// @version      0.1.4
 // @description  Watches Alta knockout dialogs and applies known Home quote fixes.
 // @author       OpenAI
 // @match        https://alta.farmers.com/*
@@ -19,7 +19,7 @@
   try { window.__ALTA_ERROR_FIXER_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'Alta Error Fixer';
-  const VERSION = '0.1.3';
+  const VERSION = '0.1.4';
   const KEYS = {
     currentJob: 'tm_alta_current_job_v1',
     panelPos: 'tm_alta_error_fixer_panel_pos_v1',
@@ -72,6 +72,17 @@
           text.includes('required for this home');
       },
       fix: fixWholeHouseWaterDetection
+    },
+    {
+      id: 'changed-by-another-user',
+      label: 'Object changed by another user',
+      matches(dialog) {
+        const text = normalize(dialog.textContent).toLowerCase();
+        return text.includes('ineligible for farmers home') &&
+          text.includes('the object you are trying to update was changed by another user') &&
+          text.includes('please try your change again');
+      },
+      fix: fixChangedByAnotherUser
     }
   ];
 
@@ -204,6 +215,16 @@
       if (fixed) clearFlowLock();
       else setFlowLock('water-leak-auto-shutoff-incomplete');
     }
+  }
+
+  async function fixChangedByAnotherUser(dialog) {
+    const goBack = actionByText('Go back and edit', dialog) || actionByText('Go back and edit');
+    if (!goBack) throw new Error('Go back and edit action not found');
+
+    clickElement(goBack);
+    log('Clicked Go back and edit for changed-by-another-user knockout');
+    await waitFor(() => !findKnockoutDialog(), 8000).catch(() => null);
+    await sleep(750);
   }
 
   async function setMatSelectValue(select, wantedText, label, findCurrent = () => select) {

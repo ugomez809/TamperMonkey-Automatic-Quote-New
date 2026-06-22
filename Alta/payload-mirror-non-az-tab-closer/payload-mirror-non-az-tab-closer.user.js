@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Alta Payload Mirror + Non-AZ Tab Closer
 // @namespace    homebot.payload-mirror-non-az-tab-closer
-// @version      0.1.3
+// @version      0.1.4
 // @description  After Alta HOME webhook success, mirrors the final Alta payload into AgencyZoom, closes non-AZ tabs, and lets the finisher complete the ticket.
 // @author       OpenAI
 // @match        https://alta.farmers.com/*
@@ -24,7 +24,7 @@
   try { window.__ALTA_PAYLOAD_MIRROR_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'Alta Payload Mirror + Non-AZ Tab Closer';
-  const VERSION = '0.1.3';
+  const VERSION = '0.1.4';
 
   const LOG_KEY = isAzHost()
     ? 'tm_az_payload_mirror_logs_v1'
@@ -58,6 +58,7 @@
     tickMs: 500,
     maxSignalAgeMs: 90000,
     maxCloseSignalAgeMs: 10 * 60 * 1000,
+    closeSignalTabStartSlackMs: 2000,
     closeDelayMs: 1200,
     tabHeartbeatMs: 5000,
     maxLogLines: 80,
@@ -82,6 +83,8 @@
     closing: false,
     lastLogClearAt: '',
     lastRuntimeCleanupKey: '',
+    lastIgnoredCloseSignalKey: '',
+    openedAtMs: Date.now(),
     lastHeartbeatAt: 0,
     tabId: `tab_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
   };
@@ -457,9 +460,31 @@
   function shouldCloseThisTab(signal) {
     if (isAzHost() || state.closing) return false;
     const signalAzId = normalizeText(signal?.azId || signal?.ticketId || '');
+    const requestedMs = Date.parse(normalizeText(signal?.requestedAt || signal?.closedAt || ''));
+    if (Number.isFinite(requestedMs) && requestedMs < (state.openedAtMs - CFG.closeSignalTabStartSlackMs)) {
+      logIgnoredCloseSignal(signal, 'signal predates this tab');
+      return false;
+    }
+
     const contextAzId = getContextAzId();
-    if (isAltaHost() && !contextAzId) return false;
-    return !signalAzId || !contextAzId || signalAzId === contextAzId;
+    if (!contextAzId) {
+      logIgnoredCloseSignal(signal, 'tab AZ context not ready');
+      return false;
+    }
+
+    if (signalAzId !== contextAzId) {
+      logIgnoredCloseSignal(signal, `signal AZ ${signalAzId || '(blank)'} does not match tab AZ ${contextAzId}`);
+      return false;
+    }
+
+    return true;
+  }
+
+  function logIgnoredCloseSignal(signal, reason) {
+    const key = `${buildSignalKey(signal)}|${reason}`;
+    if (!key || state.lastIgnoredCloseSignalKey === key) return;
+    state.lastIgnoredCloseSignalKey = key;
+    log(`Ignoring close signal: ${reason}`);
   }
 
   function getContextAzId() {

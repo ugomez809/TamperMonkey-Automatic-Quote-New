@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Alta Payload Mirror + Non-AZ Tab Closer
 // @namespace    homebot.payload-mirror-non-az-tab-closer
-// @version      0.1.1
-// @description  Test mode: after Alta HOME webhook success, mirrors the final Alta payload into AgencyZoom localStorage and leaves Alta open.
+// @version      0.1.2
+// @description  After Alta HOME webhook success, mirrors the final Alta payload into AgencyZoom, closes non-AZ tabs, and lets the finisher complete the ticket.
 // @author       OpenAI
 // @match        https://alta.farmers.com/*
 // @match        https://farmersagent.lightning.force.com/*
@@ -24,7 +24,7 @@
   try { window.__ALTA_PAYLOAD_MIRROR_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'Alta Payload Mirror + Non-AZ Tab Closer';
-  const VERSION = '0.1.1';
+  const VERSION = '0.1.2';
 
   const LOG_KEY = isAzHost()
     ? 'tm_az_payload_mirror_logs_v1'
@@ -55,6 +55,8 @@
   const CFG = {
     tickMs: 500,
     maxSignalAgeMs: 90000,
+    maxCloseSignalAgeMs: 10 * 60 * 1000,
+    closeDelayMs: 1200,
     tabHeartbeatMs: 5000,
     maxLogLines: 80,
     zIndex: 2147483647,
@@ -73,6 +75,9 @@
     activeSignalKey: '',
     mirrored: false,
     manualDoneReady: false,
+    finalizedSignalKey: '',
+    closeTimer: 0,
+    closing: false,
     lastLogClearAt: '',
     lastHeartbeatAt: 0,
     tabId: `tab_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
@@ -87,11 +92,11 @@
     loadLogs();
     log(`Loaded v${VERSION}`);
     log(`Host: ${location.hostname}`);
-    clearCloseSignals();
-    log('Auto close disabled for testing; Alta will stay open');
+    clearStaleCloseSignals();
+    log(isAzHost() ? 'AgencyZoom bridge mode active' : 'Auto close enabled for non-AgencyZoom tabs');
     setStatus(state.running ? 'Watching for webhook success' : 'Stopped');
     if (typeof GM_addValueChangeListener === 'function') {
-      for (const key of [KEYS.success, KEYS.finalPayload, KEYS.finalReady]) {
+      for (const key of [KEYS.success, KEYS.finalPayload, KEYS.finalReady, KEYS.closeSignal]) {
         try { GM_addValueChangeListener(key, () => window.setTimeout(() => tick(`gm:${key}`), 0)); } catch {}
       }
     }
@@ -125,6 +130,13 @@
     if (isAzHost()) {
       const bridged = bridgePayloadsToAzLocal();
       if (bridged) state.mirrored = true;
+    }
+
+    const closeSignal = readCloseSignal();
+    if (closeSignal && shouldCloseThisTab(closeSignal)) {
+      activateCloseSignal(closeSignal, reason);
+      renderAll();
+      return;
     }
 
     if (!state.running) {
@@ -161,9 +173,9 @@
     if (readyMatchesSignal(signal)) {
       if (!state.manualDoneReady) {
         state.manualDoneReady = true;
-        log(`Payload ready for AZ ${signal.azId}; manual done button enabled`);
+        log(`Payload ready for AZ ${signal.azId}; finalizing handoff`);
       }
-      setStatus('Posted/mirrored; Alta left open');
+      finalizeSuccessfulHandoff(signal);
     } else {
       setStatus('Waiting for mirrored payload');
     }
@@ -290,6 +302,134 @@
     }
   }
 
+  function clearStaleCloseSignals() {
+    const signal = readShared(KEYS.closeSignal) || readJson(KEYS.closeSignal);
+    if (!signal) return;
+    const requestedMs = Date.parse(normalizeText(signal.requestedAt || signal.closedAt || ''));
+    if (Number.isFinite(requestedMs) && Date.now() - requestedMs <= CFG.maxCloseSignalAgeMs) return;
+    clearCloseSignals();
+    log('Cleared stale close signals');
+  }
+
+  function finalizeSuccessfulHandoff(signal) {
+    const key = buildSignalKey(signal);
+    if (!key || state.finalizedSignalKey === key) return true;
+    if (!readyMatchesSignal(signal)) return false;
+
+    state.finalizedSignalKey = key;
+    markSuccessConsumed(signal);
+    writeSession(KEYS.handledSignal, key);
+    publishCloseSignal(signal);
+    state.manualDoneReady = false;
+
+    if (isAzHost()) {
+      setStatus(`Payload mirrored for AZ ${signal.azId}; finisher ready`);
+      log(`Final handoff ready in AgencyZoom for AZ ${signal.azId}`);
+      return true;
+    }
+
+    setStatus('Payload mirrored; closing tab');
+    scheduleCurrentTabClose(signal, 'webhook success mirrored');
+    return true;
+  }
+
+  function publishCloseSignal(signal) {
+    const azId = normalizeText(signal?.azId || '');
+    if (!azId) return null;
+    const closeSignal = {
+      ready: true,
+      azId,
+      ticketId: azId,
+      requestedAt: nowIso(),
+      signalKey: buildSignalKey(signal),
+      source: SCRIPT_NAME,
+      version: VERSION,
+      closeNonAzTabs: true
+    };
+    writeShared(KEYS.closeSignal, closeSignal);
+    writeJson(KEYS.closeSignal, closeSignal);
+    log(`Published non-AZ close signal for AZ ${azId}`);
+    return closeSignal;
+  }
+
+  function readCloseSignal() {
+    const signal = readShared(KEYS.closeSignal) || readJson(KEYS.closeSignal);
+    if (!isFreshCloseSignal(signal)) return null;
+    return signal;
+  }
+
+  function isFreshCloseSignal(signal) {
+    if (!isPlainObject(signal) || signal.ready !== true) return false;
+    const azId = normalizeText(signal.azId || signal.ticketId || '');
+    const requestedAt = normalizeText(signal.requestedAt || signal.closedAt || '');
+    if (!azId || !requestedAt) return false;
+    const ms = Date.parse(requestedAt);
+    return Number.isFinite(ms) && Date.now() - ms <= CFG.maxCloseSignalAgeMs;
+  }
+
+  function shouldCloseThisTab(signal) {
+    if (isAzHost() || state.closing) return false;
+    const signalAzId = normalizeText(signal?.azId || signal?.ticketId || '');
+    const contextAzId = getContextAzId();
+    if (isAltaHost() && !contextAzId) return false;
+    return !signalAzId || !contextAzId || signalAzId === contextAzId;
+  }
+
+  function getContextAzId() {
+    const currentJob = readJson(KEYS.currentJob) || readJson(KEYS.sharedJob) || {};
+    const homePayload = readJson(KEYS.homePayload) || {};
+    const finalPayload = readJson(KEYS.finalPayload) || {};
+    return normalizeText(
+      currentJob?.['AZ ID'] ||
+      extractPayloadAzId(homePayload) ||
+      finalPayload?.azId ||
+      ''
+    );
+  }
+
+  function activateCloseSignal(signal, reason = '') {
+    const key = buildSignalKey(signal);
+    if (!key || state.finalizedSignalKey === `close:${key}`) return;
+    state.finalizedSignalKey = `close:${key}`;
+    setStatus('Closing non-AZ tab');
+    log(`Close signal received for AZ ${signal.azId || signal.ticketId}${reason ? ` | ${reason}` : ''}`);
+    scheduleCurrentTabClose(signal, 'close signal');
+  }
+
+  function scheduleCurrentTabClose(signal, reason = '') {
+    if (isAzHost() || state.closing) return;
+    state.closing = true;
+    writeCloseAttempt(signal, reason);
+    if (state.closeTimer) clearTimeout(state.closeTimer);
+    state.closeTimer = window.setTimeout(() => closeCurrentTab(reason), CFG.closeDelayMs);
+  }
+
+  function writeCloseAttempt(signal, reason = '') {
+    const payload = {
+      azId: normalizeText(signal?.azId || signal?.ticketId || ''),
+      attemptedAt: nowIso(),
+      reason,
+      host: location.hostname,
+      href: location.href,
+      source: SCRIPT_NAME,
+      version: VERSION
+    };
+    writeShared(KEYS.closeAttempted, payload);
+    writeJson(KEYS.closeAttempted, payload);
+  }
+
+  function closeCurrentTab(reason = '') {
+    log(`Closing current non-AZ tab${reason ? ` | ${reason}` : ''}`);
+    setStatus('Closing tab');
+    try { window.open('', '_self'); } catch {}
+    try { window.close(); } catch {}
+    window.setTimeout(() => {
+      if (document.visibilityState === 'hidden') return;
+      setStatus('Close attempted; browser may require manual close');
+      log('Browser did not close this tab automatically; manual close may be required');
+    }, 1500);
+  }
+
   function acknowledgeManualDone() {
     const signal = state.activeSignal || readSuccessSignal();
     if (!isPlainObject(signal)) {
@@ -305,12 +445,8 @@
     }
 
     const key = buildSignalKey(signal);
-    markSuccessConsumed(signal);
-    if (key) writeSession(KEYS.handledSignal, key);
-    state.manualDoneReady = false;
-    clearCloseSignals();
-    setStatus('Manual done marked; Alta left open');
-    log(`Manual done marked for AZ ${signal.azId}; no Alta close attempted`);
+    if (key) state.finalizedSignalKey = '';
+    finalizeSuccessfulHandoff(signal);
     renderAll();
     return true;
   }
@@ -443,20 +579,20 @@
 
     panel.innerHTML = `
       <div data-head style="padding:10px 12px;background:#111827;display:flex;align-items:center;justify-content:space-between;gap:10px;cursor:move;">
-        <div><div style="font-weight:800;">${SCRIPT_NAME}</div><div style="font-size:11px;opacity:.72;">Webhook mirror; auto close disabled</div></div>
+        <div><div style="font-weight:800;">${SCRIPT_NAME}</div><div style="font-size:11px;opacity:.72;">Webhook mirror; auto closes non-AZ</div></div>
         <div style="font-size:11px;opacity:.72;">v${VERSION}</div>
       </div>
       <div style="padding:12px;">
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
           <button data-toggle type="button" style="border:0;border-radius:6px;padding:8px 10px;background:#15803d;color:#fff;font-weight:800;cursor:pointer;">START</button>
           <button data-copy type="button" style="border:0;border-radius:6px;padding:8px 10px;background:#2563eb;color:#fff;font-weight:800;cursor:pointer;">COPY MIRROR + LOGS</button>
-          <button data-manual-done type="button" style="border:0;border-radius:6px;padding:8px 10px;background:#475569;color:#fff;font-weight:800;cursor:pointer;">MARK DONE</button>
+          <button data-manual-done type="button" style="border:0;border-radius:6px;padding:8px 10px;background:#475569;color:#fff;font-weight:800;cursor:pointer;">FINALIZE NOW</button>
         </div>
         <div data-status style="font-weight:800;color:#86efac;margin-bottom:10px;">Watching for webhook success</div>
         <div style="display:grid;grid-template-columns:110px 1fr;gap:6px 8px;margin-bottom:10px;">
           <div style="opacity:.72;">AZ ID</div><div data-azid>-</div>
           <div style="opacity:.72;">Payload mirrored</div><div data-mirrored>No</div>
-          <div style="opacity:.72;">Manual done</div><div data-manual-status>-</div>
+          <div style="opacity:.72;">Final handoff</div><div data-manual-status>-</div>
         </div>
         <textarea data-logs readonly style="width:100%;min-height:150px;max-height:210px;resize:vertical;background:#020617;border:1px solid #243041;border-radius:6px;color:#cbd5e1;padding:10px;white-space:pre;overflow:auto;"></textarea>
       </div>
@@ -506,14 +642,14 @@
     if (state.ui.azId) state.ui.azId.textContent = normalizeText(state.activeSignal?.azId || meta?.azId || '-') || '-';
     if (state.ui.mirrored) state.ui.mirrored.textContent = state.mirrored || meta?.ready ? 'Yes' : 'No';
     if (state.ui.manualStatus) {
-      state.ui.manualStatus.textContent = state.manualDoneReady ? 'Ready' : '-';
+      state.ui.manualStatus.textContent = state.closing ? 'Closing' : (state.manualDoneReady ? 'Ready' : '-');
     }
     if (state.ui.toggle) {
       state.ui.toggle.textContent = state.running ? 'STOP' : 'START';
       state.ui.toggle.style.background = state.running ? '#b91c1c' : '#15803d';
     }
     if (state.ui.manualDone) {
-      state.ui.manualDone.style.background = state.manualDoneReady ? '#0f766e' : '#475569';
+      state.ui.manualDone.style.background = state.manualDoneReady || state.closing ? '#0f766e' : '#475569';
     }
     renderLogs();
   }

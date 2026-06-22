@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         Cross-Origin Storage Tools
 // @namespace    homebot.storage-tools
-// @version      1.6.0
+// @version      1.6.1
 // @description  Tiny standalone helper: exports tracked AZ + APEX + Alta HOME payload/storage to TXT, mirrors key Home payloads into shared cache, and clears tracked workflow data without deleting saved setup.
 // @match        https://app.agencyzoom.com/*
 // @match        https://farmersagent.lightning.force.com/*
@@ -19,9 +19,9 @@
 (function () {
   'use strict';
 
-  const VERSION = '1.6.0';
-  const UI_ID = 'tm-az-apex-alta-storage-tools-v160';
-  const TOAST_ID = 'tm-az-apex-alta-storage-tools-toast-v160';
+  const VERSION = '1.6.1';
+  const UI_ID = 'tm-az-apex-alta-storage-tools-v161';
+  const TOAST_ID = 'tm-az-apex-alta-storage-tools-toast-v161';
   const CLEANUP_REQUEST_KEY = 'tm_az_workflow_cleanup_request_v1';
   // Log-export feature: any tracked-prefix key ending in _logs_v1 is a
   // per-script rolling log buffer written by individual scripts so this
@@ -104,6 +104,7 @@
     'tm_alta_webhook_submit_stopped_v17',
     'tm_alta_webhook_post_success_v1',
     'tm_alta_webhook_post_success_consumed_v1',
+    'tm_az_ticket_finisher_wake_v1',
     'tm_alta_force_send_now_v1',
     'tm_alta_shared_failure_selector_sent_v1',
     'tm_alta_payload_mirror_close_signal_v1',

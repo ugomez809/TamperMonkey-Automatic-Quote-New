@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Alta Payload Bridge
 // @namespace    homebot.alta-payload-bridge
-// @version      0.1.2
+// @version      0.1.3
 // @description  Mirrors AgencyZoom/APEX job data into Alta and mirrors Alta home quote results back to AgencyZoom.
 // @author       OpenAI
 // @match        https://app.agencyzoom.com/*
@@ -24,7 +24,7 @@
   try { window.__ALTA_PAYLOAD_BRIDGE_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'Alta Payload Bridge';
-  const VERSION = '0.1.2';
+  const VERSION = '0.1.3';
 
   const SHARED = {
     currentJob: 'tm_alta_bridge_current_job_v1',
@@ -45,6 +45,8 @@
     altaHomePayload: 'tm_alta_home_quote_grab_payload_v1',
     altaFinalPayload: 'tm_az_alta_final_payload_v1',
     altaFinalReady: 'tm_az_alta_final_payload_ready_v1',
+    finisherWake: 'tm_az_ticket_finisher_wake_v1',
+    runtimeCleanupRequest: 'tm_alta_runtime_cleanup_request_v1',
     panelPos: 'tm_alta_payload_bridge_panel_pos_v1',
     logs: 'tm_alta_payload_bridge_logs_v1'
   };
@@ -61,7 +63,8 @@
     listeners: [],
     panel: null,
     ui: {},
-    logs: []
+    logs: [],
+    lastRuntimeCleanupKey: ''
   };
 
   init();
@@ -111,6 +114,8 @@
   }
 
   function syncAgencyZoom(reason) {
+    consumeRuntimeCleanupRequest();
+
     const azPayload = readLocalJson(LOCAL.azPayload);
     if (azPayload) {
       const job = normalizeJob(azPayload);
@@ -127,8 +132,75 @@
     if (isFreshReady(finalReady) && finalPayload?.azId) {
       writeLocalJson(LOCAL.altaFinalPayload, finalPayload);
       writeLocalJson(LOCAL.altaFinalReady, finalReady);
+      publishFinisherWake(finalPayload, finalReady);
       logOnce(`az-final-${finalReady.signalKey || finalReady.savedAt}`, `Wrote Alta final payload for AZ ${finalPayload.azId}`);
     }
+  }
+
+  function buildRuntimeCleanupKey(request) {
+    if (!isPlainObject(request)) return '';
+    return [
+      normalizeText(request.azId || request.ticketId || ''),
+      normalizeText(request.requestedAt || ''),
+      normalizeText(request.nonce || '')
+    ].join('|');
+  }
+
+  function consumeRuntimeCleanupRequest() {
+    const request = readLocalJson(LOCAL.runtimeCleanupRequest);
+    const key = buildRuntimeCleanupKey(request);
+    if (!key || key === state.lastRuntimeCleanupKey) return false;
+
+    const azId = normalizeText(request?.azId || request?.ticketId || '');
+    const requestedMs = Date.parse(normalizeText(request?.requestedAt || ''));
+    if (!azId || !Number.isFinite(requestedMs) || Date.now() - requestedMs > (10 * 60 * 1000)) return false;
+
+    const finalPayload = readShared(SHARED.finalPayload);
+    const finalReady = readShared(SHARED.finalReady);
+    const finalAzId = normalizeText(finalPayload?.azId || finalReady?.azId || '');
+    if (!finalAzId || finalAzId !== azId) return false;
+
+    const savedMs = Date.parse(normalizeText(finalPayload?.savedAt || finalReady?.savedAt || finalPayload?.signalPostedAt || ''));
+    if (Number.isFinite(savedMs) && savedMs > requestedMs + 1000) return false;
+
+    state.lastRuntimeCleanupKey = key;
+    clearMirroredRuntimeHandoff(azId);
+    logOnce(`cleanup-${key}`, `Runtime cleanup consumed for AZ ${azId}`);
+    return true;
+  }
+
+  function clearMirroredRuntimeHandoff(azId = '') {
+    writeShared(SHARED.homePayload, null);
+    writeShared(SHARED.finalPayload, null);
+    writeShared(SHARED.finalReady, null);
+    for (const key of [LOCAL.altaHomePayload, LOCAL.altaFinalPayload, LOCAL.altaFinalReady, LOCAL.finisherWake]) {
+      try { localStorage.removeItem(key); } catch {}
+    }
+    if (azId) logOnce(`cleanup-local-${azId}`, `Cleared local final handoff for AZ ${azId}`);
+  }
+
+  function publishFinisherWake(finalPayload, finalReady) {
+    const azId = normalizeText(finalPayload?.azId || finalReady?.azId || '');
+    if (!azId) return null;
+    const wake = {
+      ready: true,
+      azId,
+      ticketId: azId,
+      savedAt: normalizeText(finalPayload?.savedAt || finalReady?.savedAt || ''),
+      signalPostedAt: normalizeText(finalPayload?.signalPostedAt || finalReady?.signalPostedAt || ''),
+      signalKey: normalizeText(finalPayload?.signalKey || finalReady?.signalKey || `${azId}|${finalPayload?.savedAt || finalReady?.savedAt || ''}`),
+      bridgedAt: nowIso(),
+      source: SCRIPT_NAME,
+      version: VERSION
+    };
+    writeLocalJson(LOCAL.finisherWake, wake);
+    try {
+      window.dispatchEvent(new CustomEvent('tm-az-finisher-wake', { detail: wake }));
+    } catch {}
+    try {
+      document.dispatchEvent(new CustomEvent('tm-az-finisher-wake', { detail: wake }));
+    } catch {}
+    return wake;
   }
 
   function syncApex(reason) {

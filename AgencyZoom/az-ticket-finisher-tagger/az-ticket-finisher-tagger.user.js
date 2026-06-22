@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         AgencyZoom Ticket Finisher + Tagger
 // @namespace    homebot.az-ticket-finisher-tagger
-// @version      1.0.60
+// @version      1.0.61
 // @description  Reads the mirrored Alta final payload in AgencyZoom, clicks Main, fills ticket fields, clicks Update, adds a pinned note, applies the correct tag, and marks the ticket complete.
 // @match        https://app.agencyzoom.com/*
 // @match        https://app.agencyzoom.com/referral/pipeline*
@@ -20,7 +20,7 @@
   try { window.__AZ_TICKET_FINISHER_TAGGER_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'AgencyZoom Ticket Finisher + Tagger';
-  const VERSION = '1.0.60';
+  const VERSION = '1.0.61';
   const UI_ATTR = 'data-tm-az-finisher-ui';
   const CLEANUP_REQUEST_KEY = 'tm_az_workflow_cleanup_request_v1';
   const FINISHER_CLOSE_SIGNAL_KEY = 'tm_az_finisher_ticket_closed_signal_v1';
@@ -52,6 +52,7 @@
     webhookSubmitSentMeta: 'tm_alta_webhook_submit_sent_meta_v17',
     webhookSubmitStopped: 'tm_alta_webhook_submit_stopped_v17',
     webhookSuccess: 'tm_alta_webhook_post_success_v1',
+    finisherWake: 'tm_az_ticket_finisher_wake_v1',
     flowStage: 'tm_alta_flow_stage_v1',
     closeSignal: 'tm_alta_payload_mirror_close_signal_v1',
     lexCloseConsumed: 'tm_alta_payload_mirror_lex_close_consumed_signal_v1',
@@ -83,6 +84,7 @@
     GM_KEYS.webhookSubmitSentMeta,
     GM_KEYS.webhookSubmitStopped,
     GM_KEYS.webhookSuccess,
+    GM_KEYS.finisherWake,
     GM_KEYS.flowStage,
     GM_KEYS.closeSignal,
     GM_KEYS.lexCloseConsumed,
@@ -221,6 +223,7 @@
     lastFinalPayloadRejectLogKey: '',
     lastMissingPayloadTriggerLogKey: '',
     lastOpenTicketFallbackKey: '',
+    lastRuntimeWakeKey: '',
     openTicketId: '',
     openTicketOpenedAt: 0,
     lastMainClickedTicketId: '',
@@ -254,6 +257,9 @@
     window.addEventListener('focus', onFrontStateChange, true);
     window.addEventListener('blur', onFrontStateChange, true);
     window.addEventListener('storage', handleLogClearStorageEvent, true);
+    window.addEventListener('storage', handleRuntimeWakeStorageEvent, true);
+    window.addEventListener('tm-az-finisher-wake', handleRuntimeWakeEvent, true);
+    document.addEventListener('tm-az-finisher-wake', handleRuntimeWakeEvent, true);
     persistLogsThrottled();
 
     tick();
@@ -273,6 +279,9 @@
     try { window.removeEventListener('focus', onFrontStateChange, true); } catch {}
     try { window.removeEventListener('blur', onFrontStateChange, true); } catch {}
     try { window.removeEventListener('storage', handleLogClearStorageEvent, true); } catch {}
+    try { window.removeEventListener('storage', handleRuntimeWakeStorageEvent, true); } catch {}
+    try { window.removeEventListener('tm-az-finisher-wake', handleRuntimeWakeEvent, true); } catch {}
+    try { document.removeEventListener('tm-az-finisher-wake', handleRuntimeWakeEvent, true); } catch {}
     stopPicker('', false);
     try { state.hoverBox?.remove(); } catch {}
     try { state.panel?.remove(); } catch {}
@@ -474,6 +483,7 @@
     state.lastFinalPayloadRejectLogKey = '';
     state.lastMissingPayloadTriggerLogKey = '';
     state.lastOpenTicketFallbackKey = '';
+    state.lastRuntimeWakeKey = '';
     clearRejectedFinalPayloadState();
     resetWaitingTicketMismatch();
     resetLauncherDataMissing();
@@ -695,6 +705,62 @@
     setTimeout(() => {
       if (!state.destroyed) tick();
     }, 0);
+  }
+
+  function getRuntimeWakeKey(signal, reason = '') {
+    const azId = norm(signal?.azId || signal?.ticketId || '');
+    const marker = norm(
+      signal?.signalKey ||
+      signal?.payloadKey ||
+      signal?.savedAt ||
+      signal?.postedAt ||
+      signal?.bridgedAt ||
+      signal?.wokeAt ||
+      ''
+    );
+    if (!azId && !marker) return norm(reason || '');
+    return `${azId}|${marker || reason}`;
+  }
+
+  function scheduleRuntimeWake(reason = '', signal = null) {
+    if (state.destroyed) return;
+    const cleanReason = norm(reason || 'runtime wake') || 'runtime wake';
+    const cleanSignal = isPlainObject(signal) ? signal : {};
+    const wakeKey = `${cleanReason}|${getRuntimeWakeKey(cleanSignal, cleanReason)}`;
+    const azId = norm(cleanSignal.azId || cleanSignal.ticketId || '');
+
+    if (wakeKey && state.lastRuntimeWakeKey !== wakeKey) {
+      state.lastRuntimeWakeKey = wakeKey;
+      log(`Finisher wake received${azId ? ` | AZ ${azId}` : ''} | ${cleanReason}`);
+    }
+
+    if (!state.running) {
+      state.running = true;
+      saveRunning(true);
+      setStatus('Resuming for mirrored payload');
+    }
+
+    window.setTimeout(() => {
+      if (!state.destroyed && !state.busy && !state.picker) tick();
+    }, 0);
+  }
+
+  function handleRuntimeWakeEvent(event) {
+    scheduleRuntimeWake('same-page handoff', event?.detail || null);
+  }
+
+  function handleRuntimeWakeStorageEvent(event) {
+    if (event?.storageArea !== localStorage) return;
+    if (event.newValue == null || event.newValue === '') return;
+    if (![
+      GM_KEYS.finisherWake,
+      GM_KEYS.finalReady,
+      GM_KEYS.finalPayload,
+      GM_KEYS.homePayload,
+      GM_KEYS.missingPayloadTrigger
+    ].includes(event.key)) return;
+    const signal = readJson(event.newValue, null);
+    scheduleRuntimeWake(`storage:${event.key}`, signal);
   }
 
   function resetWaitingTicketMismatch() {

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Alta Payload Mirror + Non-AZ Tab Closer
 // @namespace    homebot.payload-mirror-non-az-tab-closer
-// @version      0.1.2
+// @version      0.1.3
 // @description  After Alta HOME webhook success, mirrors the final Alta payload into AgencyZoom, closes non-AZ tabs, and lets the finisher complete the ticket.
 // @author       OpenAI
 // @match        https://alta.farmers.com/*
@@ -24,7 +24,7 @@
   try { window.__ALTA_PAYLOAD_MIRROR_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'Alta Payload Mirror + Non-AZ Tab Closer';
-  const VERSION = '0.1.2';
+  const VERSION = '0.1.3';
 
   const LOG_KEY = isAzHost()
     ? 'tm_az_payload_mirror_logs_v1'
@@ -38,10 +38,12 @@
     successConsumed: 'tm_alta_webhook_post_success_consumed_v1',
     finalPayload: 'tm_az_alta_final_payload_v1',
     finalReady: 'tm_az_alta_final_payload_ready_v1',
+    finisherWake: 'tm_az_ticket_finisher_wake_v1',
     homePayload: 'tm_alta_home_quote_grab_payload_v1',
     webhookBundle: 'tm_alta_webhook_bundle_v1',
     currentJob: 'tm_alta_current_job_v1',
     sharedJob: 'tm_shared_az_job_v1',
+    runtimeCleanupRequest: 'tm_alta_runtime_cleanup_request_v1',
     closeSignal: 'tm_alta_payload_mirror_close_signal_v1',
     lexCloseConsumed: 'tm_alta_payload_mirror_lex_close_consumed_signal_v1',
     ignoreCloseLease: 'tm_alta_payload_mirror_ignore_close_lease_v1',
@@ -79,6 +81,7 @@
     closeTimer: 0,
     closing: false,
     lastLogClearAt: '',
+    lastRuntimeCleanupKey: '',
     lastHeartbeatAt: 0,
     tabId: `tab_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
   };
@@ -128,6 +131,7 @@
     writeTabHeartbeat();
 
     if (isAzHost()) {
+      consumeRuntimeCleanupRequest();
       const bridged = bridgePayloadsToAzLocal();
       if (bridged) state.mirrored = true;
     }
@@ -289,9 +293,92 @@
     }
     if (bridged) {
       const meta = readMirroredMeta();
-      if (meta?.azId) setStatus(`Mirrored payload available in AZ ${meta.azId}`);
+      if (meta?.azId) {
+        publishFinisherWake(meta);
+        setStatus(`Mirrored payload available in AZ ${meta.azId}`);
+      }
     }
     return bridged;
+  }
+
+  function buildRuntimeCleanupKey(request) {
+    if (!isPlainObject(request)) return '';
+    return [
+      normalizeText(request.azId || request.ticketId || ''),
+      normalizeText(request.requestedAt || ''),
+      normalizeText(request.nonce || '')
+    ].join('|');
+  }
+
+  function consumeRuntimeCleanupRequest() {
+    if (!isAzHost()) return false;
+    const request = readJson(KEYS.runtimeCleanupRequest) || readShared(KEYS.runtimeCleanupRequest);
+    const key = buildRuntimeCleanupKey(request);
+    if (!key || key === state.lastRuntimeCleanupKey) return false;
+
+    const azId = normalizeText(request?.azId || request?.ticketId || '');
+    const requestedMs = Date.parse(normalizeText(request?.requestedAt || ''));
+    if (!azId || !Number.isFinite(requestedMs) || Date.now() - requestedMs > CFG.maxCloseSignalAgeMs) return false;
+
+    const meta = readMirroredMeta();
+    if (!meta?.azId || meta.azId !== azId) return false;
+
+    const savedMs = Date.parse(normalizeText(meta.savedAt || meta.signalPostedAt || ''));
+    if (Number.isFinite(savedMs) && savedMs > requestedMs + 1000) return false;
+
+    state.lastRuntimeCleanupKey = key;
+    clearMirroredRuntimeHandoff(azId);
+    log(`Runtime cleanup consumed for AZ ${azId}`);
+    return true;
+  }
+
+  function clearMirroredRuntimeHandoff(azId = '') {
+    const keys = [
+      KEYS.finalPayload,
+      KEYS.finalReady,
+      KEYS.finisherWake,
+      KEYS.homePayload,
+      KEYS.webhookBundle,
+      KEYS.success,
+      KEYS.successConsumed,
+      KEYS.closeSignal,
+      KEYS.closeAttempted
+    ];
+    for (const key of keys) {
+      writeShared(key, null);
+      try { localStorage.removeItem(key); } catch {}
+      try { sessionStorage.removeItem(key); } catch {}
+    }
+    state.activeSignal = null;
+    state.activeSignalKey = '';
+    state.mirrored = false;
+    state.manualDoneReady = false;
+    state.finalizedSignalKey = '';
+    if (azId) setStatus(`Runtime cleaned for AZ ${azId}`);
+  }
+
+  function publishFinisherWake(meta) {
+    const azId = normalizeText(meta?.azId || '');
+    if (!azId) return null;
+    const wake = {
+      ready: true,
+      azId,
+      ticketId: azId,
+      savedAt: normalizeText(meta?.savedAt || ''),
+      signalPostedAt: normalizeText(meta?.signalPostedAt || ''),
+      signalKey: `${azId}|${normalizeText(meta?.savedAt || meta?.signalPostedAt || '')}`,
+      bridgedAt: nowIso(),
+      source: SCRIPT_NAME,
+      version: VERSION
+    };
+    writeJson(KEYS.finisherWake, wake);
+    try {
+      window.dispatchEvent(new CustomEvent('tm-az-finisher-wake', { detail: wake }));
+    } catch {}
+    try {
+      document.dispatchEvent(new CustomEvent('tm-az-finisher-wake', { detail: wake }));
+    } catch {}
+    return wake;
   }
 
   function clearCloseSignals() {

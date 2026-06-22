@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         AgencyZoom Quote Launcher + Payload Grabber
 // @namespace    homebot.az-stage-runner
-// @version      2.5.43
+// @version      2.5.44
 // @description  HOME-only AZ stage runner. Always boots through a fresh clear+reload cycle, restores after its own reload token, switches to Ignored tags from the saved-query filter, opens one ticket per page refresh, and launches the Home quote path only.
 // @match        https://app.agencyzoom.com/*
 // @match        https://app.agencyzoom.com/referral/pipeline*
@@ -20,7 +20,7 @@
   try { window.__HB_AZ_STAGE_RUNNER_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'AgencyZoom Quote Launcher + Payload Grabber';
-  const VERSION = '2.5.43';
+  const VERSION = '2.5.44';
 
   // Persist state.logs to a tracked key so storage-tools.user.js can export
   // every script's logs in one click, and listen for a cross-origin clear
@@ -86,6 +86,7 @@
     MAIN_PAYLOAD_FAILURES: 'tm_az_stage_runner_main_payload_failures_v1',
     FINAL_PAYLOAD: 'tm_az_alta_final_payload_v1',
     FINAL_READY: 'tm_az_alta_final_payload_ready_v1',
+    FINISHER_WAKE: 'tm_az_ticket_finisher_wake_v1',
     AUTH_HOLD: 'tm_shared_auth_hold_v1',
     ANCHOR_STATE: 'tm_shared_anchor_state_v1'
   };
@@ -148,7 +149,7 @@
     'tm_alta_webhook_submit_stopped_v17',
     'tm_alta_webhook_post_success_v1',
     'tm_alta_webhook_post_success_consumed_v1',
-    'tm_az_ticket_finisher_wake_v1',
+    KEYS.FINISHER_WAKE,
     'tm_alta_force_send_now_v1',
     'tm_alta_shared_failure_selector_sent_v1',
     'tm_alta_payload_mirror_close_signal_v1',
@@ -300,6 +301,7 @@
         && event.key !== KEYS.ANCHOR_STATE
         && event.key !== KEYS.FINAL_READY
         && event.key !== KEYS.FINAL_PAYLOAD
+        && event.key !== KEYS.FINISHER_WAKE
       ) return;
       const reason = event.key === KEYS.FINISHER_CLOSE_SIGNAL
         ? 'finisher-close'
@@ -311,7 +313,9 @@
               ? 'auth-hold'
               : event.key === KEYS.ANCHOR_STATE
                 ? 'anchor-state'
-          : 'final-home-payload';
+                : event.key === KEYS.FINISHER_WAKE
+                  ? 'finisher-wake'
+                  : 'final-home-payload';
       markExternalWake(reason);
     };
     window.addEventListener('storage', state.storageWakeHandler, true);
@@ -1222,14 +1226,19 @@
 
     const ready = readSharedJson(KEYS.FINAL_READY, null);
     const payload = readSharedJson(KEYS.FINAL_PAYLOAD, null);
-    const finalId = norm(ready?.azId || payload?.azId || '');
+    const wake = readSharedJson(KEYS.FINISHER_WAKE, null);
+    const finalId = norm(ready?.azId || payload?.azId || wake?.azId || wake?.ticketId || '');
     if (!finalId || finalId !== wantedId) return false;
 
     const timeCandidates = [
       ready?.savedAt,
       ready?.signalPostedAt,
       payload?.savedAt,
-      payload?.signalPostedAt
+      payload?.signalPostedAt,
+      wake?.bridgedAt,
+      wake?.wokeAt,
+      wake?.savedAt,
+      wake?.signalPostedAt
     ].map((value) => Date.parse(norm(value || ''))).filter(Number.isFinite);
 
     if (minSignalMs && timeCandidates.length && Math.max(...timeCandidates) < (minSignalMs - 2000)) {

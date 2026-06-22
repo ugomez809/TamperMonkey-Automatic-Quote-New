@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Alta Payload Mirror + Non-AZ Tab Closer
 // @namespace    homebot.payload-mirror-non-az-tab-closer
-// @version      0.1.4
+// @version      0.1.5
 // @description  After Alta HOME webhook success, mirrors the final Alta payload into AgencyZoom, closes non-AZ tabs, and lets the finisher complete the ticket.
 // @author       OpenAI
 // @match        https://alta.farmers.com/*
@@ -24,7 +24,7 @@
   try { window.__ALTA_PAYLOAD_MIRROR_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'Alta Payload Mirror + Non-AZ Tab Closer';
-  const VERSION = '0.1.4';
+  const VERSION = '0.1.5';
 
   const LOG_KEY = isAzHost()
     ? 'tm_az_payload_mirror_logs_v1'
@@ -84,6 +84,7 @@
     lastLogClearAt: '',
     lastRuntimeCleanupKey: '',
     lastIgnoredCloseSignalKey: '',
+    lastFinisherWakeDispatchKey: '',
     openedAtMs: Date.now(),
     lastHeartbeatAt: 0,
     tabId: `tab_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
@@ -375,12 +376,13 @@
       version: VERSION
     };
     writeJson(KEYS.finisherWake, wake);
-    try {
-      window.dispatchEvent(new CustomEvent('tm-az-finisher-wake', { detail: wake }));
-    } catch {}
-    try {
-      document.dispatchEvent(new CustomEvent('tm-az-finisher-wake', { detail: wake }));
-    } catch {}
+    const dispatchKey = normalizeText(wake.signalKey || `${azId}|${wake.savedAt || wake.signalPostedAt || ''}`);
+    if (dispatchKey && state.lastFinisherWakeDispatchKey !== dispatchKey) {
+      state.lastFinisherWakeDispatchKey = dispatchKey;
+      try {
+        document.dispatchEvent(new CustomEvent('tm-az-finisher-wake', { detail: wake }));
+      } catch {}
+    }
     return wake;
   }
 

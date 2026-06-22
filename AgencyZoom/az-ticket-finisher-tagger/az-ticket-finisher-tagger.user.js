@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         AgencyZoom Ticket Finisher + Tagger
 // @namespace    homebot.az-ticket-finisher-tagger
-// @version      1.0.61
+// @version      1.0.62
 // @description  Reads the mirrored Alta final payload in AgencyZoom, clicks Main, fills ticket fields, clicks Update, adds a pinned note, applies the correct tag, and marks the ticket complete.
 // @match        https://app.agencyzoom.com/*
 // @match        https://app.agencyzoom.com/referral/pipeline*
@@ -20,7 +20,7 @@
   try { window.__AZ_TICKET_FINISHER_TAGGER_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'AgencyZoom Ticket Finisher + Tagger';
-  const VERSION = '1.0.61';
+  const VERSION = '1.0.62';
   const UI_ATTR = 'data-tm-az-finisher-ui';
   const CLEANUP_REQUEST_KEY = 'tm_az_workflow_cleanup_request_v1';
   const FINISHER_CLOSE_SIGNAL_KEY = 'tm_az_finisher_ticket_closed_signal_v1';
@@ -3022,7 +3022,7 @@
 
   function evaluateFinishCloseGate({ data, finalPayload, missingPayloadTriggerKey, forceRun }) {
     const cleanAzId = norm(data?.azId || '');
-    const openTicket = getOpenTicketInfo({ fallbackTicketId: data?.missingPayloadFallback ? cleanAzId : '' });
+    const openTicket = getOpenTicketInfo({ fallbackTicketId: cleanAzId });
     const openId = norm(openTicket.ticketId || '');
     const now = Date.now();
 
@@ -3171,7 +3171,7 @@
       return;
     }
 
-    const openTicket = getOpenTicketInfo({ fallbackTicketId: data.missingPayloadFallback ? data.azId : '' });
+    const openTicket = getOpenTicketInfo({ fallbackTicketId: data.azId });
     if (!openTicket.ticketId) {
       setStatus('Waiting for open ticket');
       return;
@@ -3382,18 +3382,20 @@
 
     const detectedOpenTicket = getOpenTicketInfo();
     const missingPayloadTrigger = getActiveMissingPayloadTrigger(detectedOpenTicket.ticketId);
-    const openTicket = applyOpenTicketFallback(detectedOpenTicket, missingPayloadTrigger?.ticketId || '');
+    const finalPayload = missingPayloadTrigger ? null : getFinalPayload();
+    const openTicketFallbackId = norm(missingPayloadTrigger?.ticketId || finalPayload?.azId || '');
+    const openTicket = applyOpenTicketFallback(detectedOpenTicket, openTicketFallbackId);
     if (openTicket.inferredTicketId && openTicket.root) {
-      const fallbackKey = `trigger|${openTicket.ticketId}`;
+      const fallbackSource = missingPayloadTrigger ? 'direct failed-path' : 'final payload';
+      const fallbackKey = `${fallbackSource}|${openTicket.ticketId}`;
       if (state.lastOpenTicketFallbackKey !== fallbackKey) {
         state.lastOpenTicketFallbackKey = fallbackKey;
-        log(`Open ticket ID not readable from dock; using direct failed-path AZ ${openTicket.ticketId} for the current open ticket`);
+        log(`Open ticket ID not readable from dock; using ${fallbackSource} AZ ${openTicket.ticketId} for the current open ticket`);
       }
     } else {
       state.lastOpenTicketFallbackKey = '';
     }
     updateOpenTicketTracking(openTicket);
-    const finalPayload = missingPayloadTrigger ? null : getFinalPayload();
     const mismatchWait = missingPayloadTrigger
       ? { active: false, ready: false }
       : getWaitingTicketMismatchState(openTicket.ticketId, finalPayload?.azId || '');

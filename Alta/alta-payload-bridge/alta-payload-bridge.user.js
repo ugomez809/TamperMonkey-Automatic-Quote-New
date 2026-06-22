@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Alta Payload Bridge
 // @namespace    homebot.alta-payload-bridge
-// @version      0.1.3
+// @version      0.1.4
 // @description  Mirrors AgencyZoom/APEX job data into Alta and mirrors Alta home quote results back to AgencyZoom.
 // @author       OpenAI
 // @match        https://app.agencyzoom.com/*
@@ -24,7 +24,7 @@
   try { window.__ALTA_PAYLOAD_BRIDGE_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'Alta Payload Bridge';
-  const VERSION = '0.1.3';
+  const VERSION = '0.1.4';
 
   const SHARED = {
     currentJob: 'tm_alta_bridge_current_job_v1',
@@ -64,7 +64,8 @@
     panel: null,
     ui: {},
     logs: [],
-    lastRuntimeCleanupKey: ''
+    lastRuntimeCleanupKey: '',
+    lastFinisherWakeDispatchKey: ''
   };
 
   init();
@@ -194,12 +195,13 @@
       version: VERSION
     };
     writeLocalJson(LOCAL.finisherWake, wake);
-    try {
-      window.dispatchEvent(new CustomEvent('tm-az-finisher-wake', { detail: wake }));
-    } catch {}
-    try {
-      document.dispatchEvent(new CustomEvent('tm-az-finisher-wake', { detail: wake }));
-    } catch {}
+    const dispatchKey = normalizeText(wake.signalKey || `${azId}|${wake.savedAt || wake.signalPostedAt || ''}`);
+    if (dispatchKey && state.lastFinisherWakeDispatchKey !== dispatchKey) {
+      state.lastFinisherWakeDispatchKey = dispatchKey;
+      try {
+        document.dispatchEvent(new CustomEvent('tm-az-finisher-wake', { detail: wake }));
+      } catch {}
+    }
     return wake;
   }
 

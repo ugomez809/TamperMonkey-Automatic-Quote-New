@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Alta Webhook Submission
 // @namespace    homebot.webhook-submission
-// @version      0.1.0
+// @version      0.1.1
 // @description  HOME-only Alta sender. Waits for the Alta current job and final Home payload, then posts one webhook bundle and raises the Alta webhook success signal.
 // @author       OpenAI
 // @match        https://alta.farmers.com/*
@@ -24,7 +24,7 @@
   try { window.__ALTA_WEBHOOK_SUBMISSION_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'Alta Webhook Submission';
-  const VERSION = '0.1.0';
+  const VERSION = '0.1.1';
   const SCRIPT_ID = 'webhook-submission';
   const LOG_KEY = 'tm_alta_webhook_submission_logs_v1';
   const LOG_CLEAR_SIGNAL_KEY = 'hb_logs_clear_request_v1';
@@ -188,9 +188,10 @@
     }
 
     const signature = buildSignature(job, bundle);
-    if (!force && isSameBundleAlreadySent(job, bundle, signature)) {
+    const endpointSignature = buildEndpointSignature(endpoint);
+    if (!force && isSameBundleAlreadySent(job, bundle, signature, endpointSignature)) {
       setStatus('Already sent');
-      log('Same bundle already sent');
+      log('Same bundle already sent to this webhook URL');
       return;
     }
 
@@ -199,7 +200,7 @@
     renderButtons();
     setStatus('Sending...');
     writeActivity('working', force ? 'Force sending webhook' : 'Sending webhook');
-    log(`POST ${endpoint}`);
+    log(`${force ? 'FORCE ' : ''}QUOTE POST ${endpoint}`);
     log(`Current Job AZ ID: ${job['AZ ID']}`);
     log(`Bundle source: ${source || resolved.source || 'unknown'}`);
     log(`Bundle sections -> home:${hasMeaningfulHome(bundle) ? 'yes' : 'no'} timeout:${hasPendingTimeout(bundle) ? 'yes' : 'no'}`);
@@ -220,8 +221,8 @@
         if (parsed && parsed.ok === false) throw new Error(parsed.error || parsed.message || 'Receiver returned ok:false');
 
         clearFatalHold(job['AZ ID']);
-        setSentMeta({ signature, sentAt: nowIso(), azId: job['AZ ID'] });
-        setPostSuccess(job, signature);
+        setSentMeta({ signature, endpointSignature, endpoint: normalizeEndpoint(endpoint), sentAt: nowIso(), azId: job['AZ ID'] });
+        setPostSuccess(job, signature, endpointSignature);
         clearForceSend();
         writeFlowStage('home', 'done', job['AZ ID']);
         state.running = false;
@@ -277,6 +278,7 @@
       if (parsed && parsed.ok === false) throw new Error(parsed.error || parsed.message || 'Receiver returned ok:false');
       setStatus('Test sent');
       log('Test webhook success');
+      log('Test send does not mark the quote bundle sent; use SEND NOW for the real bundle');
     } catch (err) {
       setStatus('Test failed');
       log(`Test failed: ${err?.message || err}`);
@@ -491,12 +493,13 @@
     };
   }
 
-  function setPostSuccess(job, signature) {
+  function setPostSuccess(job, signature, endpointSignature = '') {
     const payload = {
       ok: true,
       azId: normalizeText(job?.['AZ ID'] || ''),
       postedAt: nowIso(),
       signature: normalizeText(signature || ''),
+      endpointSignature: normalizeText(endpointSignature || ''),
       source: SCRIPT_NAME,
       version: VERSION
     };
@@ -510,18 +513,41 @@
     try { GM_setValue(KEYS.sentMeta, meta); } catch {}
   }
 
-  function isSameBundleAlreadySent(job, bundle, signature) {
+  function isSameBundleAlreadySent(job, bundle, signature, endpointSignature) {
     const sent = readJson(KEYS.sentMeta) || gmGetJson(KEYS.sentMeta);
-    return normalizeText(sent?.azId || '') === normalizeText(job?.['AZ ID'] || '') && normalizeText(sent?.signature || '') === normalizeText(signature || '');
+    return normalizeText(sent?.azId || '') === normalizeText(job?.['AZ ID'] || '') &&
+      normalizeText(sent?.signature || '') === normalizeText(signature || '') &&
+      normalizeText(sent?.endpointSignature || '') === normalizeText(endpointSignature || '');
   }
 
   function buildSignature(job, bundle) {
     return hashString(JSON.stringify({
-      'AZ ID': job['AZ ID'] || '',
-      currentJob: job,
-      home: bundle?.home?.data || null,
-      timeout: Array.isArray(bundle?.timeout?.events) ? bundle.timeout.events : []
+      'AZ ID': normalizeText(job['AZ ID'] || bundle?.['AZ ID'] || ''),
+      SubmissionNumber: pickFirst(job.SubmissionNumber, bundle?.SubmissionNumber, bundle?.home?.submissionNumber),
+      home: getHomeSignatureData(bundle),
+      timeout: stableSignatureValue(Array.isArray(bundle?.timeout?.events) ? bundle.timeout.events : [])
     }));
+  }
+
+  function getHomeSignatureData(bundle) {
+    const data = bundle?.home?.data;
+    if (isPlainObject(data?.row)) return stableSignatureValue(data.row);
+    return stableSignatureValue(data || null);
+  }
+
+  function stableSignatureValue(value) {
+    if (Array.isArray(value)) return value.map(stableSignatureValue);
+    if (!isPlainObject(value)) return value;
+    const out = {};
+    for (const key of Object.keys(value).sort()) {
+      if (/^(updatedAt|savedAt|sentAt|postedAt|signalPostedAt|builtAt|sourcePayload|currentJob|page)$/i.test(key)) continue;
+      out[key] = stableSignatureValue(value[key]);
+    }
+    return out;
+  }
+
+  function buildEndpointSignature(endpoint) {
+    return hashString(normalizeEndpoint(endpoint));
   }
 
   function readForceSend() {
@@ -599,7 +625,7 @@
     const before = getWebhookUrl();
     const saved = mirrorTextKey(KEYS.webhookUrl, state.ui.webhookUrl?.value || '');
     updateActiveUrl(saved);
-    if (withLog && saved !== before) log(saved ? 'Webhook URL saved' : 'Webhook URL cleared');
+    if (withLog && saved !== before) log(saved ? `Webhook URL saved: ${truncateMiddle(saved, 110)}` : 'Webhook URL cleared');
   }
 
   function persistAgencyNameFromUi(withLog) {
@@ -867,6 +893,17 @@
       return host === '127.0.0.1' || host === 'localhost' || host === '::1' || host === '[::1]';
     } catch {
       return false;
+    }
+  }
+
+  function normalizeEndpoint(url) {
+    const text = normalizeText(url);
+    try {
+      const parsed = new URL(text);
+      parsed.hash = '';
+      return parsed.href.replace(/\/$/, '');
+    } catch {
+      return text;
     }
   }
 

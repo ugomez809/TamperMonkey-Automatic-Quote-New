@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Alta Error Fixer
 // @namespace    homebot.alta-error-fixer
-// @version      0.1.4
+// @version      0.1.5
 // @description  Watches Alta knockout dialogs and applies known Home quote fixes.
 // @author       OpenAI
 // @match        https://alta.farmers.com/*
@@ -19,7 +19,7 @@
   try { window.__ALTA_ERROR_FIXER_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'Alta Error Fixer';
-  const VERSION = '0.1.4';
+  const VERSION = '0.1.5';
   const KEYS = {
     currentJob: 'tm_alta_current_job_v1',
     panelPos: 'tm_alta_error_fixer_panel_pos_v1',

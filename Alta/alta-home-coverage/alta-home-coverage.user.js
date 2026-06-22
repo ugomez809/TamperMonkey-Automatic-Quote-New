@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Alta Home Coverage
 // @namespace    homebot.alta-home-coverage
-// @version      0.1.14
+// @version      0.1.15
 // @description  Auto-runs the Alta home-coverage page. Sets All Perils to 5000, Split Water to 5 percent, captures pricing, and publishes the Alta home payload.
 // @author       OpenAI
 // @match        https://alta.farmers.com/*
@@ -19,7 +19,7 @@
   try { window.__ALTA_HOME_COVERAGE_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'Alta Home Coverage';
-  const VERSION = '0.1.14';
+  const VERSION = '0.1.15';
   const KEYS = {
     currentJob: 'tm_alta_current_job_v1',
     payload: 'tm_alta_home_quote_grab_payload_v1',
@@ -28,7 +28,7 @@
     errorFixerLock: 'tm_alta_error_fixer_flow_lock_v1',
     waterDeviceDecision: 'tm_alta_water_device_added_v1'
   };
-  const CFG = { maxLogLines: 40, waitMs: 12000, loadWaitMs: 25000, settleMs: 1600, pollMs: 200, autoScanMs: 800, recalcWaitMs: 8000, recalcNudgeMs: 15000, recalcRetryWaitMs: 3000, recalcClickCooldownMs: 10000, priceWaitMs: 60000 };
+  const CFG = { maxLogLines: 40, waitMs: 12000, loadWaitMs: 25000, settleMs: 1600, pollMs: 200, autoScanMs: 800, recalcWaitMs: 8000, recalcNudgeMs: 15000, recalcRetryWaitMs: 3000, recalcClickCooldownMs: 10000, priceWaitMs: 60000, discountControlWaitMs: 5000, pricingScenarioAttempts: 2 };
   const state = {
     panel: null,
     ui: {},
@@ -244,30 +244,42 @@
         error: ''
       };
 
-      try {
-        log(`Pricing step: ${scenario.field}`);
-        await setCoverageTemplate(scenario.template, true);
-        await setHomeAutoDiscount(scenario.autoDiscount, true);
-        await applyCoverageDefaults();
-        const price = await recalculateAndCapturePrice(lastAmount, scenario.autoDiscount);
-        const amount = price.totalWithFees || price.termPremium || '';
-        lastPrice = price;
+      for (let attempt = 1; attempt <= CFG.pricingScenarioAttempts; attempt += 1) {
+        try {
+          run.attempts = attempt;
+          log(`Pricing step: ${scenario.field}${attempt > 1 ? ` (retry ${attempt})` : ''}`);
+          await waitForCoverageControls();
+          await setCoverageTemplate(scenario.template, true);
+          await setHomeAutoDiscount(scenario.autoDiscount, true);
+          await applyCoverageDefaults();
+          const price = await recalculateAndCapturePrice(lastAmount, scenario.autoDiscount);
+          const amount = price.totalWithFees || price.termPremium || '';
+          lastPrice = price;
 
-        if (!price.valid || !amount) throw new Error(price.reason || 'price not found');
-        const templateKey = scenario.template.toLowerCase();
-        if (scenario.autoDiscount && amountsByTemplate[templateKey] === amount) {
-          throw new Error('auto discount premium did not change after recalculation');
+          if (!price.valid || !amount) throw new Error(price.reason || 'price not found');
+          const templateKey = scenario.template.toLowerCase();
+          if (scenario.autoDiscount && amountsByTemplate[templateKey] === amount) {
+            throw new Error('auto discount premium did not change after recalculation');
+          }
+          rowUpdates[scenario.field] = amount;
+          run.ok = true;
+          run.amount = amount;
+          run.error = '';
+          lastAmount = amount;
+          if (!scenario.autoDiscount) amountsByTemplate[templateKey] = amount;
+          autoDiscountSeen = autoDiscountSeen || scenario.autoDiscount;
+          log(`${scenario.field}: ${amount}`);
+          break;
+        } catch (err) {
+          run.error = err?.message || String(err);
+          if (attempt < CFG.pricingScenarioAttempts && shouldRetryPricingScenario(run.error)) {
+            log(`Retrying ${scenario.field}: ${run.error}`);
+            await waitForCoverageControls(CFG.discountControlWaitMs * 2);
+            continue;
+          }
+          log(`Skipped ${scenario.field}: ${run.error}`);
+          break;
         }
-        rowUpdates[scenario.field] = amount;
-        run.ok = true;
-        run.amount = amount;
-        lastAmount = amount;
-        if (!scenario.autoDiscount) amountsByTemplate[templateKey] = amount;
-        autoDiscountSeen = autoDiscountSeen || scenario.autoDiscount;
-        log(`${scenario.field}: ${amount}`);
-      } catch (err) {
-        run.error = err?.message || String(err);
-        log(`Skipped ${scenario.field}: ${run.error}`);
       }
 
       runs.push(run);
@@ -303,6 +315,10 @@
       if (price.valid && amount && (!beforeAmount || amount !== beforeAmount)) return price;
 
       if (isPageBusy()) {
+        await sleep(CFG.pollMs);
+        continue;
+      }
+      if (isErrorFixerFlowActive()) {
         await sleep(CFG.pollMs);
         continue;
       }
@@ -365,10 +381,19 @@
   async function cycleHomeAutoDiscount(targetEnabled) {
     const first = !targetEnabled;
     log(`Recalculate still unavailable; cycling Home/Auto discount ${first ? 'on' : 'off'} then ${targetEnabled ? 'on' : 'off'}`);
-    await setHomeAutoDiscount(first, true);
+    const firstChanged = await setHomeAutoDiscount(first, false);
+    if (!firstChanged) {
+      log('Home/Auto discount control unavailable during nudge; continuing price wait');
+      return false;
+    }
     await sleep(700);
-    await setHomeAutoDiscount(targetEnabled, true);
+    const targetChanged = await setHomeAutoDiscount(targetEnabled, false);
+    if (!targetChanged) {
+      log('Home/Auto discount control unavailable during nudge reset; continuing price wait');
+      return false;
+    }
     await sleep(700);
+    return true;
   }
 
   function findRecalculateButton() {
@@ -381,7 +406,7 @@
   }
 
   async function setHomeAutoDiscount(enabled, required = true) {
-    const control = findBundleDiscountControl('Home/Auto');
+    const control = await waitForBundleDiscountControl('Home/Auto', required ? CFG.discountControlWaitMs : 0);
     if (!control) {
       if (!enabled) {
         log('Home/Auto discount control not found; capturing no-auto price');
@@ -410,13 +435,55 @@
       return true;
     }
 
-    throw new Error(`Home/Auto discount did not switch ${enabled ? 'on' : 'off'}`);
+    const message = `Home/Auto discount did not switch ${enabled ? 'on' : 'off'}`;
+    if (!required) {
+      log(`${message}; continuing without nudge`);
+      return false;
+    }
+    throw new Error(message);
   }
 
   function findBundleDiscountControl(label) {
     const wantedId = `BUNDLE_DISCOUNT_${label}`;
-    return document.querySelector(`[data-test-id="${cssAttr(wantedId)}"]`) ||
+    const direct = document.querySelector(`[data-test-id="${cssAttr(wantedId)}"]`) ||
       [...document.querySelectorAll('[data-test-id]')].find((el) => normalize(el.getAttribute('data-test-id')).includes(wantedId));
+    if (direct) return direct;
+
+    const labelRe = /home\s*(?:\/\s*)?auto/i;
+    const candidates = [...document.querySelectorAll('mat-checkbox, mat-slide-toggle, label, [role="checkbox"], [role="switch"]')]
+      .filter((el) => !state.panel?.contains?.(el) && isVisible(el) && labelRe.test(normalize(el.textContent)));
+    for (const candidate of candidates) {
+      const root = candidate.closest?.('mat-checkbox, mat-slide-toggle, .mat-mdc-checkbox, .mat-checkbox, [role="checkbox"], [role="switch"], .row, [class*="discount"]') || candidate;
+      if (root && hasToggleControl(root) && labelRe.test(normalize(root.textContent || candidate.textContent))) return root;
+    }
+    return null;
+  }
+
+  function hasToggleControl(root) {
+    if (!root) return false;
+    const selector = 'mat-checkbox, mat-slide-toggle, input[type="checkbox"], input[type="radio"], [role="checkbox"], [role="switch"], .mat-mdc-checkbox-touch-target, .mat-checkbox-inner-container, .mdc-checkbox';
+    return !!(root.matches?.(selector) || root.querySelector?.(selector));
+  }
+
+  async function waitForBundleDiscountControl(label, timeoutMs = CFG.discountControlWaitMs) {
+    const immediate = findBundleDiscountControl(label);
+    if (immediate || !timeoutMs) return immediate;
+    return waitFor(() => {
+      if (isErrorFixerFlowActive() || isPageBusy()) return null;
+      return findBundleDiscountControl(label);
+    }, timeoutMs).catch(() => null);
+  }
+
+  async function waitForCoverageControls(timeoutMs = CFG.discountControlWaitMs) {
+    if (isErrorFixerFlowActive()) {
+      log('Error fixer active; waiting for coverage controls');
+    }
+    const control = await waitForBundleDiscountControl('Home/Auto', timeoutMs);
+    return !!control;
+  }
+
+  function shouldRetryPricingScenario(message) {
+    return /home\/auto discount control|timed out waiting|premium stayed|price not found|placeholder|score error/i.test(normalize(message));
   }
 
   function findClickableToggle(control) {

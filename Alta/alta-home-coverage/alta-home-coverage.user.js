@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Alta Home Coverage
 // @namespace    homebot.alta-home-coverage
-// @version      0.1.13
+// @version      0.1.14
 // @description  Auto-runs the Alta home-coverage page. Sets All Perils to 5000, Split Water to 5 percent, captures pricing, and publishes the Alta home payload.
 // @author       OpenAI
 // @match        https://alta.farmers.com/*
@@ -19,7 +19,7 @@
   try { window.__ALTA_HOME_COVERAGE_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'Alta Home Coverage';
-  const VERSION = '0.1.13';
+  const VERSION = '0.1.14';
   const KEYS = {
     currentJob: 'tm_alta_current_job_v1',
     payload: 'tm_alta_home_quote_grab_payload_v1',
@@ -28,7 +28,7 @@
     errorFixerLock: 'tm_alta_error_fixer_flow_lock_v1',
     waterDeviceDecision: 'tm_alta_water_device_added_v1'
   };
-  const CFG = { maxLogLines: 40, waitMs: 12000, loadWaitMs: 25000, settleMs: 1600, pollMs: 200, autoScanMs: 800, recalcWaitMs: 8000, recalcNudgeMs: 15000, recalcRetryWaitMs: 3000, priceWaitMs: 60000 };
+  const CFG = { maxLogLines: 40, waitMs: 12000, loadWaitMs: 25000, settleMs: 1600, pollMs: 200, autoScanMs: 800, recalcWaitMs: 8000, recalcNudgeMs: 15000, recalcRetryWaitMs: 3000, recalcClickCooldownMs: 10000, priceWaitMs: 60000 };
   const state = {
     panel: null,
     ui: {},
@@ -291,26 +291,40 @@
     const beforeAmount = previousAmount || before.totalWithFees || before.termPremium || '';
     const start = Date.now();
     let nextNudgeAt = start + CFG.recalcNudgeMs;
-    await clickRecalculateIfAvailable(CFG.recalcWaitMs);
+    let lastRecalcClickAt = 0;
+    if (await clickRecalculateIfAvailable(CFG.recalcWaitMs)) {
+      lastRecalcClickAt = Date.now();
+      nextNudgeAt = lastRecalcClickAt + CFG.recalcNudgeMs;
+    }
 
     while (Date.now() - start < CFG.priceWaitMs) {
       const price = capturePrice();
       const amount = price.totalWithFees || price.termPremium || '';
       if (price.valid && amount && (!beforeAmount || amount !== beforeAmount)) return price;
 
+      if (isPageBusy()) {
+        await sleep(CFG.pollMs);
+        continue;
+      }
+
       const recalc = findRecalculateButton();
-      if (recalc) {
+      const now = Date.now();
+      if (recalc && now - lastRecalcClickAt >= CFG.recalcClickCooldownMs) {
         clickElement(recalc);
+        lastRecalcClickAt = now;
         log(`Clicked recalculation CTA: ${normalize(recalc.textContent) || 'button'}`);
-        await sleep(1500);
+        await sleep(CFG.settleMs);
         nextNudgeAt = Date.now() + CFG.recalcNudgeMs;
         continue;
       }
 
-      if (Date.now() >= nextNudgeAt) {
+      if (now >= nextNudgeAt) {
         await cycleHomeAutoDiscount(targetAutoDiscount);
         nextNudgeAt = Date.now() + CFG.recalcNudgeMs;
-        await clickRecalculateIfAvailable(CFG.recalcRetryWaitMs);
+        if (await clickRecalculateIfAvailable(CFG.recalcRetryWaitMs)) {
+          lastRecalcClickAt = Date.now();
+          nextNudgeAt = lastRecalcClickAt + CFG.recalcNudgeMs;
+        }
       }
 
       await sleep(CFG.pollMs);

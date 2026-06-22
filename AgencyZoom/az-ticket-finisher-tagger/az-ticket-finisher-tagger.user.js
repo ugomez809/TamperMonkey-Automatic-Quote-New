@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         AgencyZoom Ticket Finisher + Tagger
 // @namespace    homebot.az-ticket-finisher-tagger
-// @version      1.0.62
+// @version      1.0.63
 // @description  Reads the mirrored Alta final payload in AgencyZoom, clicks Main, fills ticket fields, clicks Update, adds a pinned note, applies the correct tag, and marks the ticket complete.
 // @match        https://app.agencyzoom.com/*
 // @match        https://app.agencyzoom.com/referral/pipeline*
@@ -20,7 +20,7 @@
   try { window.__AZ_TICKET_FINISHER_TAGGER_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'AgencyZoom Ticket Finisher + Tagger';
-  const VERSION = '1.0.62';
+  const VERSION = '1.0.63';
   const UI_ATTR = 'data-tm-az-finisher-ui';
   const CLEANUP_REQUEST_KEY = 'tm_az_workflow_cleanup_request_v1';
   const FINISHER_CLOSE_SIGNAL_KEY = 'tm_az_finisher_ticket_closed_signal_v1';
@@ -127,6 +127,7 @@
     'Standard Pricing Auto Discount',
     'Enhance Pricing Auto Discount',
     'Home Submission Number',
+    'Alta Submission Number',
     'Account Number',
     DECLINE_REASON_FIELD
   ];
@@ -1636,6 +1637,47 @@
     };
   }
 
+  function getAltaSubmissionNumberForWorkflow({ payload = {}, homeRaw = {}, home = {}, homeRow = {} } = {}) {
+    return pickFirst(
+      payload.currentJob?.['Alta Submission Number'],
+      payload.currentJob?.AltaSubmissionNumber,
+      payload.currentJob?.altaSubmissionNumber,
+      payload.currentJob?.SubmissionNumber,
+      payload.homePayload?.currentJob?.['Alta Submission Number'],
+      payload.homePayload?.currentJob?.AltaSubmissionNumber,
+      payload.homePayload?.currentJob?.altaSubmissionNumber,
+      payload.homePayload?.currentJob?.SubmissionNumber,
+      homeRaw.currentJob?.['Alta Submission Number'],
+      homeRaw.currentJob?.AltaSubmissionNumber,
+      homeRaw.currentJob?.altaSubmissionNumber,
+      homeRaw.currentJob?.SubmissionNumber,
+      home.currentJob?.['Alta Submission Number'],
+      home.currentJob?.AltaSubmissionNumber,
+      home.currentJob?.altaSubmissionNumber,
+      home.currentJob?.SubmissionNumber,
+      payload.bundle?.home?.data?.currentJob?.['Alta Submission Number'],
+      payload.bundle?.home?.data?.currentJob?.AltaSubmissionNumber,
+      payload.bundle?.home?.data?.currentJob?.altaSubmissionNumber,
+      payload.bundle?.home?.data?.currentJob?.SubmissionNumber,
+      payload.bundle?.home?.sourcePayload?.currentJob?.['Alta Submission Number'],
+      payload.bundle?.home?.sourcePayload?.currentJob?.AltaSubmissionNumber,
+      payload.bundle?.home?.sourcePayload?.currentJob?.altaSubmissionNumber,
+      payload.bundle?.home?.sourcePayload?.currentJob?.SubmissionNumber,
+      payload.bundle?.['Alta Submission Number'],
+      payload.bundle?.AltaSubmissionNumber,
+      payload.bundle?.altaSubmissionNumber,
+      homeRaw['Alta Submission Number'],
+      homeRaw.AltaSubmissionNumber,
+      homeRaw.altaSubmissionNumber,
+      home['Alta Submission Number'],
+      home.AltaSubmissionNumber,
+      home.altaSubmissionNumber,
+      homeRow['Alta Submission Number'],
+      homeRow.AltaSubmissionNumber,
+      homeRow.altaSubmissionNumber
+    );
+  }
+
   function buildWorkflowDataFromProductChoices(options = {}) {
     const azId = norm(options.azId || '');
     if (!azId) return null;
@@ -1663,6 +1705,8 @@
       home.currentJob?.SubmissionNumber,
       payload.bundle?.home?.submissionNumber
     );
+
+    const altaSubmission = getAltaSubmissionNumberForWorkflow({ payload, homeRaw, home, homeRow });
 
     const accountNumber = pickFirst(
       payload.currentJob?.['Account Number'],
@@ -1713,6 +1757,7 @@
       'Standard Pricing Auto Discount': pickFirst(homeRow['Standard Pricing Auto Discount']),
       'Enhance Pricing Auto Discount': pickFirst(homeRow['Enhance Pricing Auto Discount']),
       'Home Submission Number': homeSubmission,
+      'Alta Submission Number': altaSubmission,
       'Account Number': accountNumber,
       [DECLINE_REASON_FIELD]: declineReason
     };
@@ -1781,6 +1826,7 @@
         'Standard Pricing Auto Discount': '',
         'Enhance Pricing Auto Discount': '',
         'Home Submission Number': '',
+        'Alta Submission Number': '',
         'Account Number': '',
         [DECLINE_REASON_FIELD]: noteText
       },
@@ -3653,6 +3699,60 @@
     startPicker('fields', { fieldLabels: missing });
   }
 
+  function buildSingleFieldPickerPrompt() {
+    const lines = FIELD_ORDER.map((label, index) => `${index + 1}. ${label}`);
+    return [
+      'Which field do you want to change?',
+      '',
+      lines.join('\n'),
+      '',
+      'Enter a number or exact field name.'
+    ].join('\n');
+  }
+
+  function normalizeFieldChoiceText(value) {
+    return lower(value).replace(/[^a-z0-9]+/g, '');
+  }
+
+  function resolveSingleFieldPickerSelection(value) {
+    const text = norm(value || '');
+    if (!text) return '';
+
+    if (/^\d+$/.test(text)) {
+      const index = Number(text) - 1;
+      return FIELD_ORDER[index] || '';
+    }
+
+    const cleanText = lower(text);
+    const exact = FIELD_ORDER.find((label) => lower(label) === cleanText);
+    if (exact) return exact;
+
+    const compactText = normalizeFieldChoiceText(text);
+    return FIELD_ORDER.find((label) => normalizeFieldChoiceText(label) === compactText) || '';
+  }
+
+  function startSingleFieldPicker() {
+    if (state.busy || state.picker) return;
+
+    let selected = '';
+    try {
+      selected = prompt(buildSingleFieldPickerPrompt(), '') || '';
+    } catch {
+      selected = '';
+    }
+
+    const label = resolveSingleFieldPickerSelection(selected);
+    if (!label) {
+      log('Single field target change canceled or invalid');
+      setStatus(state.running ? 'Waiting for mirrored payload' : 'Stopped');
+      renderAll();
+      return;
+    }
+
+    log(`Changing one field target: ${label}`);
+    startPicker('fields', { fieldLabels: [label] });
+  }
+
   function stopPicker(message, logIt = true) {
     if (!state.picker) return;
 
@@ -3794,6 +3894,7 @@
           <button ${UI_ATTR}="1" id="tm-az-ticket-finisher-force" type="button" style="border:0;border-radius:10px;padding:8px 10px;background:#2563eb;color:#fff;font-weight:800;cursor:pointer;">FORCE RUN</button>
           <button ${UI_ATTR}="1" id="tm-az-ticket-finisher-clean-runtime" type="button" style="border:0;border-radius:10px;padding:8px 10px;background:#b45309;color:#fff;font-weight:800;cursor:pointer;">CLEAN RUNTIME</button>
           <button ${UI_ATTR}="1" id="tm-az-ticket-finisher-set-missing-fields" type="button" style="border:0;border-radius:10px;padding:8px 10px;background:#0d9488;color:#fff;font-weight:800;cursor:pointer;">ADD MISSING FIELDS</button>
+          <button ${UI_ATTR}="1" id="tm-az-ticket-finisher-change-field" type="button" style="border:0;border-radius:10px;padding:8px 10px;background:#0369a1;color:#fff;font-weight:800;cursor:pointer;">CHANGE ONE FIELD</button>
           <button ${UI_ATTR}="1" id="tm-az-ticket-finisher-set-fields" type="button" style="border:0;border-radius:10px;padding:8px 10px;background:#0891b2;color:#fff;font-weight:800;cursor:pointer;">REDO ALL FIELDS</button>
           <button ${UI_ATTR}="1" id="tm-az-ticket-finisher-reset-fields" type="button" style="border:0;border-radius:10px;padding:8px 10px;background:#475569;color:#fff;font-weight:800;cursor:pointer;">RESET FIELD TARGETS</button>
           <button ${UI_ATTR}="1" id="tm-az-ticket-finisher-set-tags" type="button" style="border:0;border-radius:10px;padding:8px 10px;background:#f59e0b;color:#111827;font-weight:800;cursor:pointer;">SET TAG TARGETS</button>
@@ -3817,6 +3918,7 @@
     state.ui.force = panel.querySelector('#tm-az-ticket-finisher-force');
     state.ui.cleanRuntime = panel.querySelector('#tm-az-ticket-finisher-clean-runtime');
     state.ui.setMissingFields = panel.querySelector('#tm-az-ticket-finisher-set-missing-fields');
+    state.ui.changeField = panel.querySelector('#tm-az-ticket-finisher-change-field');
     state.ui.setFields = panel.querySelector('#tm-az-ticket-finisher-set-fields');
     state.ui.resetFields = panel.querySelector('#tm-az-ticket-finisher-reset-fields');
     state.ui.setTags = panel.querySelector('#tm-az-ticket-finisher-set-tags');
@@ -3862,6 +3964,7 @@
 
     state.ui.cleanRuntime?.addEventListener('click', runManualRuntimeCleanup);
     state.ui.setMissingFields?.addEventListener('click', startMissingFieldPicker);
+    state.ui.changeField?.addEventListener('click', startSingleFieldPicker);
     state.ui.setFields?.addEventListener('click', () => startPicker('fields'));
     state.ui.resetFields?.addEventListener('click', resetFieldTargets);
     state.ui.setTags?.addEventListener('click', () => startPicker('tags'));

@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Alta Home Coverage
 // @namespace    homebot.alta-home-coverage
-// @version      0.1.12
-// @description  Manual Alta home-coverage page runner. Sets All Perils to 5000, Split Water to 5 percent, captures pricing, and publishes the Alta home payload.
+// @version      0.1.13
+// @description  Auto-runs the Alta home-coverage page. Sets All Perils to 5000, Split Water to 5 percent, captures pricing, and publishes the Alta home payload.
 // @author       OpenAI
 // @match        https://alta.farmers.com/*
 // @run-at       document-idle
@@ -19,16 +19,26 @@
   try { window.__ALTA_HOME_COVERAGE_CLEANUP__?.(); } catch {}
 
   const SCRIPT_NAME = 'Alta Home Coverage';
-  const VERSION = '0.1.12';
+  const VERSION = '0.1.13';
   const KEYS = {
     currentJob: 'tm_alta_current_job_v1',
     payload: 'tm_alta_home_quote_grab_payload_v1',
     panelPos: 'tm_alta_home_coverage_panel_pos_v1',
     logs: 'tm_alta_home_coverage_logs_v1',
+    errorFixerLock: 'tm_alta_error_fixer_flow_lock_v1',
     waterDeviceDecision: 'tm_alta_water_device_added_v1'
   };
-  const CFG = { maxLogLines: 40, waitMs: 12000, pollMs: 200, recalcWaitMs: 8000, recalcNudgeMs: 15000, recalcRetryWaitMs: 3000, priceWaitMs: 60000 };
-  const state = { panel: null, ui: {}, logs: [] };
+  const CFG = { maxLogLines: 40, waitMs: 12000, loadWaitMs: 25000, settleMs: 1600, pollMs: 200, autoScanMs: 800, recalcWaitMs: 8000, recalcNudgeMs: 15000, recalcRetryWaitMs: 3000, priceWaitMs: 60000 };
+  const state = {
+    panel: null,
+    ui: {},
+    logs: [],
+    destroyed: false,
+    paused: false,
+    running: false,
+    autoTimer: null,
+    lastAutoKey: ''
+  };
 
   init();
 
@@ -38,10 +48,13 @@
     restorePanelPos();
     loadLogs();
     log(`Loaded v${VERSION}`);
+    startAutoRun();
     window.__ALTA_HOME_COVERAGE_CLEANUP__ = cleanup;
   }
 
   function cleanup() {
+    state.destroyed = true;
+    if (state.autoTimer) clearInterval(state.autoTimer);
     try { state.panel?.remove(); } catch {}
     try { delete window.__ALTA_HOME_COVERAGE_CLEANUP__; } catch {}
   }
@@ -49,7 +62,7 @@
   async function runPage({ publish = true } = {}) {
     try {
       setStatus('Running home coverage');
-      await waitFor(() => isHomeCoverageReady());
+      await waitForPageReady(() => isHomeCoverageReady(), 'Home coverage page');
 
       const pricing = await captureAllPricing();
       const coverageData = captureCoverageData();
@@ -89,6 +102,69 @@
         'Water Device?': waterDeviceAnswer()
       }, { homeCoverageComplete: false }, false, {});
     }
+  }
+
+  function startAutoRun() {
+    setStatus('Auto-run watching');
+    state.autoTimer = setInterval(autoRunTick, CFG.autoScanMs);
+    autoRunTick();
+  }
+
+  function autoRunTick() {
+    if (state.destroyed || state.running) return;
+    if (state.paused) {
+      setStatus('Paused for this tab');
+      return;
+    }
+    if (isErrorFixerFlowActive()) {
+      state.lastAutoKey = '';
+      setStatus('Error fixer active');
+      return;
+    }
+    if (!isHomeCoverageReady()) {
+      state.lastAutoKey = '';
+      return;
+    }
+
+    const key = autoPageKey();
+    if (state.lastAutoKey === key) return;
+    state.lastAutoKey = key;
+    log('Auto-run triggered');
+    startRun({ publish: true });
+  }
+
+  async function startRun(options) {
+    if (state.running) {
+      log('Run already in progress');
+      return false;
+    }
+    state.running = true;
+    updatePauseButton();
+    try {
+      return await runPage(options);
+    } finally {
+      state.running = false;
+      updatePauseButton();
+    }
+  }
+
+  function togglePause() {
+    state.paused = !state.paused;
+    log(state.paused ? 'Paused auto-run for this tab' : 'Auto-run resumed');
+    setStatus(state.paused ? 'Paused for this tab' : 'Auto-run watching');
+    updatePauseButton();
+    if (!state.paused) autoRunTick();
+  }
+
+  function updatePauseButton() {
+    const btn = state.panel?.querySelector('#alta-home-coverage-pause');
+    if (!btn) return;
+    btn.textContent = state.paused ? 'Resume Auto' : 'Pause Auto';
+    btn.style.background = state.paused ? '#b45309' : '#2563eb';
+  }
+
+  function autoPageKey() {
+    return `${location.pathname}${location.search}|home-coverage`;
   }
 
   async function setMatSelectByAria(ariaLabel, wantedText, required = true) {
@@ -546,6 +622,7 @@
     const panel = document.createElement('div');
     panel.id = 'alta-home-coverage-panel';
     panel.innerHTML = panelHtml(SCRIPT_NAME, VERSION, [
+      ['alta-home-coverage-pause', 'Pause Auto'],
       ['alta-home-coverage-run', 'Run + Publish'],
       ['alta-home-coverage-capture', 'Capture Only'],
       ['alta-home-coverage-copy', 'Copy Logs']
@@ -557,14 +634,22 @@
   }
 
   function bindPanel() {
-    state.panel.querySelector('#alta-home-coverage-run')?.addEventListener('click', () => runPage({ publish: true }));
-    state.panel.querySelector('#alta-home-coverage-capture')?.addEventListener('click', () => runPage({ publish: false }));
+    state.panel.querySelector('#alta-home-coverage-pause')?.addEventListener('click', togglePause);
+    state.panel.querySelector('#alta-home-coverage-run')?.addEventListener('click', () => {
+      state.lastAutoKey = autoPageKey();
+      startRun({ publish: true });
+    });
+    state.panel.querySelector('#alta-home-coverage-capture')?.addEventListener('click', () => {
+      state.lastAutoKey = autoPageKey();
+      startRun({ publish: false });
+    });
     state.panel.querySelector('#alta-home-coverage-copy')?.addEventListener('click', copyLogs);
     makeDraggable(state.panel, KEYS.panelPos);
+    updatePauseButton();
   }
 
   function panelCss(id) {
-    return `#${id}-panel{position:fixed;right:14px;bottom:14px;width:330px;z-index:2147483647;background:#111827;color:#f9fafb;border:1px solid #374151;border-radius:8px;font-family:Arial,sans-serif;font-size:12px;box-shadow:0 10px 28px rgba(0,0,0,.35)}#${id}-panel header{display:flex;justify-content:space-between;padding:8px 10px;border-bottom:1px solid #374151;cursor:move}#${id}-panel main{padding:8px 10px}#${id}-panel button{border:0;border-radius:6px;background:#2563eb;color:#fff;font-weight:700;padding:6px 8px;cursor:pointer;margin:0 6px 6px 0}#${id}-panel button:nth-child(3){background:#374151}.hb-status{color:#d1d5db;margin-bottom:8px}.hb-log{white-space:pre-wrap;max-height:160px;overflow:auto;background:#030712;border:1px solid #374151;border-radius:6px;padding:6px;color:#d1d5db}`;
+    return `#${id}-panel{position:fixed;right:14px;bottom:14px;width:330px;z-index:2147483647;background:#111827;color:#f9fafb;border:1px solid #374151;border-radius:8px;font-family:Arial,sans-serif;font-size:12px;box-shadow:0 10px 28px rgba(0,0,0,.35)}#${id}-panel header{display:flex;justify-content:space-between;padding:8px 10px;border-bottom:1px solid #374151;cursor:move}#${id}-panel main{padding:8px 10px}#${id}-panel button{border:0;border-radius:6px;background:#2563eb;color:#fff;font-weight:700;padding:6px 8px;cursor:pointer;margin:0 6px 6px 0}#${id}-panel button:last-child{background:#374151}.hb-status{color:#d1d5db;margin-bottom:8px}.hb-log{white-space:pre-wrap;max-height:160px;overflow:auto;background:#030712;border:1px solid #374151;border-radius:6px;padding:6px;color:#d1d5db}`;
   }
 
   function panelHtml(name, version, buttons) {
@@ -628,6 +713,14 @@
       const raw = localStorage.getItem(key);
       return raw ? JSON.parse(raw) : null;
     } catch { return null; }
+  }
+
+  function isErrorFixerFlowActive() {
+    const lock = readJson(KEYS.errorFixerLock);
+    if (!lock?.active) return false;
+    if (Number(lock.expiresAt || 0) > Date.now()) return true;
+    try { localStorage.removeItem(KEYS.errorFixerLock); } catch {}
+    return false;
   }
 
   function writeJson(key, value) {
@@ -711,8 +804,11 @@
   }
 
   function isHomeCoverageReady() {
-    const pageMarker = findByText('h1', 'Home coverages') || document.querySelector('#quoteCardCoverageCard');
-    return pageMarker && (!document.querySelector('.sidenav-current-step') || isCurrentSideNavStep('Home coverages'));
+    const pageMarker = document.querySelector('mat-select[formfieldmodifiedsegmentreporter="coverage_template"]') ||
+      document.querySelector('#quoteCardCoverageCard') ||
+      findByText('h1,h2,.pageTitle,.tui-subtitle', 'Home coverage');
+    return !!pageMarker &&
+      (!document.querySelector('.sidenav-current-step') || isCurrentSideNavStep('Home coverage'));
   }
 
   function isCurrentSideNavStep(label) {
@@ -732,6 +828,25 @@
       };
       tick();
     });
+  }
+
+  async function waitForPageReady(readyFn, label) {
+    setStatus(`Waiting for ${label} to load`);
+    await waitFor(readyFn, CFG.loadWaitMs);
+    const start = Date.now();
+    while (Date.now() - start < CFG.loadWaitMs && isPageBusy()) {
+      await sleep(CFG.pollMs);
+    }
+
+    await sleep(CFG.settleMs);
+    await waitFor(readyFn, 2500);
+    log(`${label} loaded`);
+    return true;
+  }
+
+  function isPageBusy() {
+    return [...document.querySelectorAll('mat-spinner,mat-progress-spinner,.mat-mdc-progress-spinner,.mat-progress-spinner,.spinner,[aria-busy="true"]')]
+      .some((el) => !state.panel?.contains(el) && isVisible(el));
   }
 
   function formatDate(date) {
